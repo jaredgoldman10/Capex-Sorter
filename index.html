@@ -810,7 +810,7 @@ $('#gLink').onclick = async () => {
   const { error } = await SB.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: false } });
   $('#gateErr').textContent = !error ? 'Check your email for the sign-in link and open it on this computer.'
     : /rate limit|too many|seconds/i.test(error.message) ? 'Too many sign-in emails recently. Try again later or use your password.'
-    : /signups not allowed|not found|invalid/i.test(error.message) ? "That email hasn't been invited in Supabase yet." : "Couldn't send the link: " + error.message;
+    : /signups not allowed|not found/i.test(error.message) ? "That email isn't a user in Supabase yet (" + error.message + ")." : "Couldn't send the link: " + error.message;
 };
 $('#signOutBtn').onclick = () => { if (SB) SB.auth.signOut(); };
 $('#pwBtn').onclick = () => { $('#pwForm').classList.toggle('hidden'); $('#pwStatus').textContent = ''; $('#pwNew').value = ''; $('#pwAgain').value = ''; };
