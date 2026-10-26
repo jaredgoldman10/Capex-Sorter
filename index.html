@@ -187,6 +187,7 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
         <span class="muted" id="totNote"></span>
         <span class="grow"></span>
         <button class="btn" id="copyTotals">Copy table</button>
+        <button class="btn" id="allBtn" title="Sort every year's GL tab in this workbook the same way and download them together">Sort every GL year (.xlsx)</button>
         <button class="btn primary" id="exportBtn">Download allocation (.xlsx)</button>
       </div>
       <div class="tbl-wrap"><table id="totTbl"><thead><tr>
@@ -435,11 +436,26 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     if (target <= 0) return target === 0 ? [] : null;
     const total = items.reduce((s, x) => s + x.c, 0);
     if (total < target - 1) return null;
+    // fast yes/no first (bit-parallel), so failed searches cost little
+    {
+      const n = ((target + 2) >>> 5) + 1, bits = new Uint32Array(n); bits[0] = 1;
+      for (const it of items) {
+        const ws = it.c >>> 5, bs = it.c & 31;
+        for (let i = n - 1; i >= ws; i--) {
+          const lo = bits[i - ws], hi = bs && i - ws - 1 >= 0 ? bits[i - ws - 1] >>> (32 - bs) : 0;
+          bits[i] |= bs ? ((lo << bs) | hi) >>> 0 : lo;
+        }
+      }
+      const has = (t) => t >= 0 && (bits[t >>> 5] >>> (t & 31)) & 1;
+      if (!has(target) && !has(target + 1) && !has(target - 1)) return null;
+    }
     if (target <= 6e6) {
       const from = new Int32Array(target + 2).fill(-1); from[0] = -2;
+      let reach = 0; // highest sum reachable so far: no need to scan above it
       for (let k = 0; k < items.length; k++) {
         const w = items[k].c;
-        for (let s = target + 1; s >= w; s--) if (from[s] === -1 && from[s - w] !== -1) from[s] = k;
+        reach = Math.min(target + 1, reach + w);
+        for (let s = reach; s >= w; s--) if (from[s] === -1 && from[s - w] !== -1) from[s] = k;
         if (from[target] !== -1) break;
       }
       for (const t of [target, target + 1, target - 1]) {
@@ -610,7 +626,8 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     const groups = {};
     for (const g of E.glSheets(wb)) {
       if (!years.includes(g.year)) continue;
-      if (!master.leaves.some((r) => r.values[g.year])) continue;
+      // a year with only a stray figure or two on the master (a budget plug) has nothing to learn from
+      if (master.leaves.filter((r) => r.values[g.year]).length < 3) continue;
       if (opts.exclude && opts.exclude.includes(g.year)) continue;
       (groups[g.year] = groups[g.year] || []).push(g.name);
     }
@@ -711,9 +728,9 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     C('pool deck', /pool decks?/, /pool deck|pool & pool deck/),
     // safety & security (before doors/cabinets: "door security", "first aid cabinet")
     C('first aid / safety', /(osha |type \w |class \w |certsafety )?first aid( refill)?( (cabinets?|kits?|stations?))?|fire extinguish\w*( cabinets?)?|\baed\b|eye ?wash( stations?)?|\bosha\b/, /safety/),
-    C('smoke / CO / fire alarm', /smoke (alarms?|detectors?)( hard ?wire)?|carbon monoxide( (alarms?|detectors?))?|\bco (alarms?|detectors?)|fire alarms?( system)?|sounders?|horn strobes?|\bstrobes?\b/, /smoke|fire alarm/),
+    C('smoke / CO / fire alarm', /smoke (alarms?|detectors?)( hard ?wire)?|carbon monoxide( (alarms?|detectors?))?|\bco (alarms?|detectors?)|fire alarms?( system)?|sounders?|horn strobes?|\bstrobes?\b|alarm panels?|alarm pan\b/, /smoke|fire alarm/),
     C('access control / security', /access control( panels?)?|card access|key ?fobs?|door security( system)?|entry system|security (access|system)|access doors?/, /security|access/),
-    C('fire system', /fire (systems?|sprinklers?|suppression|panels?|pumps?)|fire access/, /fire system/),
+    C('fire system', /fire (systems?|sprinklers?|suppression|panels?|pumps?|safety)|fire access/, /fire system/),
     C('camera', /cameras?|\bcctv\b|\bdvr\b|\bnvr\b|surveillance/, /camera/),
     C('intercom', /intercoms?|buzzers?|call box\w*/, /intercom/),
     C('key control', /keytrak|key ?trak|key cabinets?|key control/, /keytrak/),
@@ -742,13 +759,13 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     C('cartridge', /(tub|shower|faucet|valve) cartridges?|cartridges?/, /plumbing fixture/),
     C('shower head', /shower ?heads?/, /plumbing fixture/),
     C('vanity / bath sink', /vanit(y|ies)|(undermount )?bathroom sinks?|undermount\w*|lavator(y|ies)/, /vanit/),
-    C('medicine cabinet', /(mirrored )?medicine cabinets?/, /medicine cabinet/),
+    C('medicine cabinet', /(mirrored )?med(icine)?\.? cabin\w*/, /medicine cabinet/),
     C('tub / shower', /\btubs?\b( and)?( surrounds?)?|bath ?tubs?|shower (surrounds?|pans?|valves?|stalls?|walls?)|\bsurrounds?\b|\bshowers?\b/, /\btub|shower/),
     C('toilet', /toilets?( (seats?|tanks?|handles?|rounds?))?|commodes?|fill valves?|flappers?|wax rings?/, /toilet/),
-    C('faucet / fixture', /faucets?|supply lines?|aerators?|\bsinks?\b|p-?traps?|drain (lines?|assembl\w*|kits?)/, /plumbing fixture/),
+    C('faucet / fixture', /(bath |tub |shower )levers?|faucets?|supply lines?|aerators?|\bsinks?\b|p-?traps?|drain (lines?|assembl\w*|kits?)/, /plumbing fixture/),
     C('water main / underground pipe', /water mains?|underground (pipes?|lines?|piping)|water (line )?leaks?|main lines?|sewer (lines?|mains?)|water meter leaks?|building piping/, /underground pipe|water leak|water main/),
     // cabinets & counters
-    C('countertop', /counter ?tops?|backsplash\w*/, /countertop/),
+    C('countertop', /counter ?tops?|backsplash\w*|(kitchen |resurface )counter\w*/, /countertop/),
     C('kitchen cabinet', /cabinets?|cabinet doors?/, /kitchen cabinet|cabinets/),
     // windows, coverings, doors (blinds before flooring so "vinyl blinds" isn't flooring)
     C('blinds', /(vinyl |vertical |mini |patio )?[\dx". in]*blinds?|drapes?|draper(y|ies)|\bshades?\b|curtains?/, /blind|drape/),
@@ -781,16 +798,17 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     C('roof', /\broof\w*|shingles?|flashing|membrane/, /\broof/),
     C('gutters', /gutters?|downspouts?/, /gutter/),
     C('paving', /asphalt|paving|\bpave\b|seal ?coat\w*|parking lot|striping|crack ?fill\w*/, /paving|asphalt|sealcoat/),
-    C('sidewalk', /sidewalks?|walkways?/, /sidewalk/),
+    C('sidewalk', /side ?walks?|walkways?/, /sidewalk/),
     C('patio', /patios?/, /patio(?!\s*fence)/),
     C('concrete', /concrete|\bcurbs?\b|flat ?work/, /concrete/),
     C('masonry', /masonry|\bbrick\w*|tuck ?point\w*|mortar|block walls?/, /masonry|brick/),
     C('stairs', /\bstairs?\b|\bsteps\b|stairways?/, /stair/),
+    C('ramp', /(wheelchair |ada )?ramps?\b/, /ramp|sidewalk|concrete/),
     C('railing', /railings?|handrails?/, /railing/),
     C('fence', /fenc(e|es|ing)/, /fenc/),
     C('dumpster enclosure', /dumpsters?( enclosures?)?|trash enclosures?/, /dumpster/),
     C('signage', /\bsigns?\b|signage|monument/, /\bsign/),
-    C('mailboxes', /mail ?box\w*|mail facilit\w*|\bcbus?\b|cluster box\w*/, /mail/),
+    C('mailboxes', /ma(il|li) ?box\w*|mail facilit\w*|\bcbus?\b|cluster box\w*/, /mail/),
     C('playground', /playground|play (area|equipment)|swing sets?/, /play/),
     C('awning', /awnings?|canop(y|ies)/, /awning/),
     C('support column', /columns?|support posts?/, /column/),
@@ -857,7 +875,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
   const vnorm = (n) => String(n).toLowerCase().replace(/\b(llc|inc|co|corp|company|ltd|maintltd|the|credit services|services?)\b|[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 2).join(' ');
   // who the line is from, whether or not it's written as "AP Invoice - VENDOR:"
   E.vendorKey = function (desc) {
-    const m = /^\s*AP (?:Invoice|Adjust)\s*-\s*([^:]+):/i.exec(desc || '');
+    const m = /^\s*AP (?:Invoice|Adjust)\s*-\s*([^:]+):/i.exec(desc || '') || /^\s*([A-Z0-9][A-Z0-9 &.,'@\/\-]{2,60}):\s/.exec(desc || '');
     if (m) return vnorm(m[1]);
     const d = String(desc || '').toLowerCase();
     return VENDOR_PARTS.find((p) => new RegExp('\\b' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(d)) || '';
@@ -868,8 +886,11 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     VENDOR_RE = parts.length ? new RegExp('\\b(' + parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b[^,;:]{0,40}?(llc|inc|co\\b|company)?', 'g') : null;
   };
   function cleanDesc(desc) {
-    let d = String(desc || '').toLowerCase()
+    let d = String(desc || '')
+      .replace(/^\s*[A-Z0-9][A-Z0-9 &.,'@\/\-]{2,60}:\s/, ' ') // "HOME DEPOT CREDIT SERVICES: ..." (older GL exports)
+      .toLowerCase()
       .replace(/^\s*(ap invoice|ap adjust)\s*-\s*[^:]+:/, ' ')
+      .replace(/^\s*\d+(\.\d+)?\s+-?[\d,]+\.\d{2}\s+/, ' ') // "1.00 276.93 hvac parts": quantity and price, not words
       .replace(/reclass entry:\s*[\d.\-]+\s*-?\s*((ap invoice\s*-\s*)?[^:]{0,60}:)?/, ' ');
     if (VENDOR_RE) d = d.replace(VENDOR_RE, (m, v) => ' '.repeat(v.length) + m.slice(v.length));
     return ' ' + d
@@ -1131,10 +1152,10 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       const tot = Object.values(vk).reduce((a, b) => a + b, 0), top = Object.entries(vk).sort((a, b) => b[1] - a[1])[0];
       if (tot >= 2 && top[1] / tot >= 0.6) return { row: +top[0], conf: 0.8, alts: [], why: label + `${vendor.toUpperCase()} on this account went to ${name(+top[0])} in past years` };
     }
-    const words = desc.replace(/\b(replace\w*|repair\w*|install\w*|new|reclass|recl|expense|accrual|ye|to|record|paid|by|for|and|the|services?|llc|inc|co|corp|company|ltd)\b/g, ' ').match(/[a-z]{3,}/g) || [];
+    const words = desc.replace(/\b(replace\w*|repair\w*|install\w*|new|reclass|recl|expense|accrual|ye|to|record|paid|by|for|and|the|services?|llc|inc|co|corp|company|ltd|parts?|supplies|supply|materials?|specialists?|misc)\b/g, ' ').match(/[a-z]{3,}/g) || [];
     const byName = master.leaves.map((r) => ({ r, s: sim(line.acctName, (r.label || r.fedBy || '')) })).sort((a, b) => b.s - a.s)[0];
     const byHist = Object.entries(acctHist).sort((a, b) => b[1] - a[1])[0];
-    if (byName && byName.s >= 0.95) return { row: byName.r.row, conf: words.length < 2 ? 0.8 : 0.65, alts: [], why: label + `the GL account (${line.acctName}) has its own row` };
+    if (byName && byName.s >= 0.95) return { row: byName.r.row, conf: words.length <= 2 ? 0.8 : 0.65, alts: [], why: label + `the GL account (${line.acctName}) has its own row` };
     if (byHist && byHist[1] / histTot >= 0.6) return { row: +byHist[0], conf: 0.75, alts: [], why: label + `${line.acctName} went to ${name(+byHist[0])} in past years` };
     if (byName && byName.s >= 0.6) return { row: byName.r.row, conf: 0.6, alts: [], why: label + `used the GL account's row (${line.acctName})` };
     if (byHist) return { row: +byHist[0], conf: 0.55, alts: [], why: label + `used where ${line.acctName} went before` };
@@ -1142,17 +1163,18 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
   };
 
   /* ---------- end-to-end ---------- */
-  E.run = function (wb, opts = {}) {
+  function prep(wb, opts) {
     const masterName = opts.master || E.findMasterSheet(wb);
     const master = E.parseMaster(wb, masterName);
     const gls = E.glSheets(wb);
-    const target = opts.target ? gls.find((g) => g.name === opts.target) : gls.slice().sort((a, b) => b.year - a.year || a.name.length - b.name.length)[0];
     const vendors = [], allLines = [];
     for (const g of gls) for (const l of E.parseGL(wb, g.name)) { allLines.push(l); const m = /^\s*AP (?:Invoice|Adjust)\s*-\s*([^:]+):/i.exec(l.desc); if (m) vendors.push(m[1]); }
     E.setVendors(vendors);
     E.setPrices(allLines);
-    const { history, reports } = E.buildHistory(wb, master, { exclude: target ? [target.year] : [] });
-    // name blank master rows by the GL account that historically fed them
+    return { master, gls };
+  }
+  // name blank master rows by the GL account that historically fed them
+  function nameRows(master, history) {
     const feed = {};
     for (const e of history) { const f = (feed[e.row] = feed[e.row] || {}); f[e.acctName] = (f[e.acctName] || 0) + Math.abs(e.amt); }
     for (const r of master.leaves) {
@@ -1160,9 +1182,76 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       r.fedBy = f ? Object.entries(f).sort((a, b) => b[1] - a[1])[0][0] : '';
       r.display = r.label || (r.fedBy ? `[${r.fedBy}]` : '(blank row)');
     }
+  }
+  E.run = function (wb, opts = {}) {
+    const { master, gls } = prep(wb, opts);
+    const target = opts.target ? gls.find((g) => g.name === opts.target) : gls.slice().sort((a, b) => b.year - a.year || a.name.length - b.name.length)[0];
+    const { history, reports } = E.buildHistory(wb, master, { exclude: target ? [target.year] : [] });
+    nameRows(master, history);
     const R = { master, target, lines: target ? E.parseGL(wb, target.name) : [], reports, history, historyCount: history.length, userRules: opts.userRules || [] };
     return E.refresh(R, opts.userExamples || []);
   };
+  // every GL year in the workbook, each sorted line by line; a year never learns from its own past entries
+  E.runAll = function (wb, opts = {}) {
+    const { master, gls } = prep(wb, opts);
+    const { history, reports } = E.buildHistory(wb, master);
+    nameRows(master, history);
+    const years = [...new Set(gls.map((g) => g.year))].sort((a, b) => a - b);
+    const out = [];
+    for (const y of years) {
+      const rep = reports.find((r) => r.year === y);
+      const sheets = rep ? rep.sheet.split(' + ') : [gls.filter((g) => g.year === y).sort((a, b) => a.name.length - b.name.length)[0].name];
+      const lines = [].concat(...sheets.map((n) => E.parseGL(wb, n)));
+      const R = { master, target: { name: sheets.join(' + '), year: y }, lines, reports, history: history.filter((e) => e.year !== y), userRules: opts.userRules || [] };
+      out.push(E.refresh(R, opts.userExamples || []));
+    }
+    return { master, reports, years: out };
+  };
+  // one workbook: every year side by side on the master rows, plus each year's GL tagged line by line
+  E.allYearsWorkbook = function (X, all, opts = {}) {
+    const m = all.master, th = opts.threshold || 0.75;
+    const sums = all.years.map((R) => {
+      const s = {};
+      for (const l of R.lines) {
+        if (l.offset || !l.pred) continue;
+        const parts = l.pred.split || (l.pred.row != null ? [{ row: l.pred.row, amt: l.amt }] : []);
+        for (const p of parts) s[p.row] = Math.round(((s[p.row] || 0) + p.amt) * 100) / 100;
+      }
+      return s;
+    });
+    const head = ['Row', 'Master row', 'Group'];
+    for (const R of all.years) head.push(`${R.target.year} sorted`, `${R.target.year} on master`, `${R.target.year} difference`);
+    const rows = [head];
+    for (const r of m.leaves) {
+      const vals = all.years.map((R, i) => [sums[i][r.row] || 0, r.values[R.target.year] || 0]);
+      if (vals.every(([a, b]) => !a && !b)) continue;
+      const row = [r.row, (r.label || r.display || '').trim(), r.group];
+      for (const [a, b] of vals) row.push(a || null, b || null, Math.round((a - b) * 100) / 100 || null);
+      rows.push(row);
+    }
+    const tot = ['', 'Total', ''];
+    all.years.forEach((R, i) => { const a = Object.values(sums[i]).reduce((x, y) => x + y, 0), b = m.leaves.reduce((x, r) => x + (r.values[R.target.year] || 0), 0); tot.push(Math.round(a * 100) / 100, Math.round(b * 100) / 100, Math.round((a - b) * 100) / 100); });
+    rows.push(tot);
+    const wb = X.utils.book_new();
+    const w1 = X.utils.aoa_to_sheet(rows); w1['!cols'] = [{ wch: 6 }, { wch: 42 }, { wch: 26 }].concat(all.years.flatMap(() => [{ wch: 12 }, { wch: 12 }, { wch: 12 }]));
+    X.utils.book_append_sheet(wb, w1, 'All years by master row');
+    const leafBy = Object.fromEntries(m.leaves.map((r) => [r.row, r]));
+    for (const R of all.years.slice().reverse()) {
+      const s2 = [['Posted', 'Doc', 'GL account', 'Account name', 'Description', 'Unit', 'Amount', 'Master row', 'Category', 'Group', 'Status', 'Confidence', 'Why', 'GL tab', 'Source row']];
+      for (const l of R.lines) {
+        const parts = !l.offset && l.pred && l.pred.split ? l.pred.split : [{ row: l.pred ? l.pred.row : null, amt: l.amt }];
+        parts.forEach((p, k) => {
+          const lf = p.row != null ? leafBy[p.row] : null;
+          const status = l.offset ? 'offset' : l.pred.conf < th ? 'review' : 'auto';
+          s2.push([l.date, l.doc, l.acct, l.acctName, parts.length > 1 ? `${l.desc}  [split ${k + 1}/${parts.length}: ${p.item}]` : l.desc, l.unit, p.amt, l.offset ? '' : (p.row != null ? p.row : ''), l.offset ? 'Offset pair' : lf ? (lf.label || lf.display || '').trim() : 'Not capex', lf ? lf.group : '', parts.length > 1 ? status + ' (split)' : status, l.offset ? '' : Math.round(l.pred.conf * 100) / 100, l.offset ? 'offsets another line in this account' : l.pred.why, l.sheet, l.srcRow]);
+        });
+      }
+      const w2 = X.utils.aoa_to_sheet(s2); w2['!cols'] = [{ wch: 11 }, { wch: 12 }, { wch: 11 }, { wch: 28 }, { wch: 60 }, { wch: 8 }, { wch: 12 }, { wch: 7 }, { wch: 40 }, { wch: 26 }, { wch: 10 }, { wch: 9 }, { wch: 60 }, { wch: 12 }, { wch: 8 }];
+      X.utils.book_append_sheet(wb, w2, `${R.target.year} GL sorted`);
+    }
+    return wb;
+  };
+  const cleanFee = (d) => String(d || '').replace(/^\s*AP (Invoice|Adjust)\s*-\s*[^:]+:/i, '').replace(/^\s*[A-Z0-9][A-Z0-9 &.,'@\/\-]{2,60}:\s/, '').replace(/^\s*-?\d+(\.\d+)?\s+-?[\d,]+\.\d{2}\s+/, '').trim();
   // re-sort after you confirm or change lines, without re-reading the workbook
   E.refresh = function (R, userExamples) {
     const ex = R.history.concat(userExamples || []);
@@ -1180,6 +1269,18 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
         if (E._findConcepts(l.desc).some((h) => h.c.w >= 3)) l.pred.why = 'credit/return: ' + l.pred.why;
         else { l.pred.conf = Math.min(l.pred.conf, 0.5); l.pred.why = 'credit with no item named; ' + l.pred.why; }
       }
+    }
+    // tax, shipping, freight and discounts go wherever the rest of that invoice went
+    const FEE = /^\W*(sales )?(tax|shipping|freight|delivery( charge)?|discount|fuel surcharge|handling)\W*$/i;
+    for (const l of R.lines) {
+      if (l.offset || !l.pred || !l.doc || !l.doc.trim()) continue;
+      const words = cleanFee(l.desc);
+      if (!FEE.test(words)) continue;
+      const sib = R.lines.filter((o) => o !== l && o.doc === l.doc && o.acct === l.acct && !o.offset && o.pred && !FEE.test(cleanFee(o.desc)) && o.pred.row != null);
+      if (!sib.length) continue;
+      const by = {}; for (const o of sib) by[o.pred.row] = (by[o.pred.row] || 0) + Math.abs(o.amt);
+      const row = +Object.entries(by).sort((a, b) => b[1] - a[1])[0][0];
+      l.pred = { row, conf: 0.9, alts: [], why: `${words.trim()} on invoice ${l.doc.trim()}; follows that invoice's items` };
     }
     R.model = M;
     return R;
@@ -1600,6 +1701,20 @@ $('#wordTbl').addEventListener('click', async (e) => {
 $('#copyTotals').onclick = async () => {
   const lines = [['Row', 'Master row', 'Group', 'Sorted amount', 'Lines', 'On master now'].join('\t')].concat(renderTotals.rows.map((r) => [r[0], r[1], r[2], r[3].toFixed(2), r[4], r[5] ? r[5].toFixed(2) : ''].join('\t')));
   try { await navigator.clipboard.writeText(lines.join('\n')); toast('Copied. Paste into Excel.'); } catch (e) { toast('Clipboard blocked; use Download instead.'); }
+};
+$('#allBtn').onclick = async () => {
+  if (!WB) return;
+  const b = $('#allBtn'); b.disabled = true; b.textContent = 'Sorting every year…';
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    const master = $('#selMaster').value, m = CapexEngine.parseMaster(WB, master);
+    const A = CapexEngine.runAll(WB, { master, userExamples: userExamples(m), userRules: userRules(m) });
+    const out = CapexEngine.allYearsWorkbook(XLSX, A, { threshold: +$('#selThresh').value });
+    XLSX.writeFile(out, `${PROP.replace(/[^\w ]+/g, '').trim()} every GL year sorted.xlsx`);
+    const n = A.years.reduce((s, R) => s + R.lines.filter((l) => !l.offset && l.pred.conf < +$('#selThresh').value).length, 0);
+    toast(`${A.years.length} GL years sorted. ${n} line${n === 1 ? '' : 's'} marked for review in the file.`);
+  } catch (e) { toast("Couldn't sort every year: " + (e.message || e)); }
+  b.disabled = false; b.textContent = 'Sort every GL year (.xlsx)';
 };
 $('#exportBtn').onclick = () => {
   const t = RESULT.target, m = RESULT.master;
