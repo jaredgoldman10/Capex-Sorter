@@ -1982,11 +1982,11 @@ function finalColumns() {
   const m = RESULT.master, y = RESULT.target.year, yc = m.yearCols[y];
   const ws = WB.Sheets[m.sheet], hr = m.headerRow - 1, opts = [];
   if (yc != null) {
+    opts.push({ c: yc, label: `${XLSX.utils.encode_col(yc)} (${y})` }); // the year's own column is the default
     for (const c of [yc + 1, yc - 1]) {
       const h = ws[XLSX.utils.encode_cell({ r: hr, c })];
       if (h && /ytd|actual/i.test(String(h.v))) opts.push({ c, label: `${XLSX.utils.encode_col(c)} (${String(h.v).trim()})` });
     }
-    opts.push({ c: yc, label: `${XLSX.utils.encode_col(yc)} (${y})` });
   }
   return opts;
 }
