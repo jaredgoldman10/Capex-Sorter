@@ -357,8 +357,10 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       if (rows[i].isSub) group = rows[i].label || 'Other';
       else rows[i].group = group;
     }
-    const leaves = rows.filter((r) => !r.isSub);
-    return { sheet: name, labelCol, yearCols, headerRow: h.row + 1, leaves, subtotals: rows.filter((r) => r.isSub), firstRow: startRow + 1, lastRow: endRow + 1 };
+    // hidden rows are left out: a figure there can't be seen, and copying the column skips it
+    const hiddenRows = new Set(((ws['!rows'] || []).map((x, i) => (x && x.hidden ? i + 1 : 0))).filter(Boolean));
+    const leaves = rows.filter((r) => !r.isSub && !hiddenRows.has(r.row));
+    return { sheet: name, labelCol, yearCols, headerRow: h.row + 1, leaves, subtotals: rows.filter((r) => r.isSub), firstRow: startRow + 1, lastRow: endRow + 1, totalRow: te ? te.r + 1 : null, hiddenRows: [...hiddenRows] };
   };
 
   /* ---------- GL tabs ---------- */
@@ -1463,17 +1465,24 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const s = oldTag ? attr(oldTag, 's') : null;
     return `<c r="${ref}"${s ? ` s="${s}"` : ''}><v>${value}</v></c>`;
   }
+  const xmlEsc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  function formulaXml(ref, oldTag, f) {
+    const s = oldTag ? attr(oldTag, 's') : null;
+    return `<c r="${ref}"${s ? ` s="${s}"` : ''}><f>${xmlEsc(f)}</f></c>`;
+  }
   function blankXml(ref, oldTag) {
     const s = oldTag ? attr(oldTag, 's') : null;
     return `<c r="${ref}"${s ? ` s="${s}"` : ''}/>`;
   }
 
   // values: { rowNumber: amount }, col: 0-based column index, clear: [rowNumbers] to blank out
-  function editSheet(xml, col, values, clear) {
+  function editSheet(xml, col, values, clear, formulas) {
     const L = colLet(col), skipped = [];
     const wanted = new Map();
     for (const [r, v] of Object.entries(values)) wanted.set(+r, { v: Math.round(v * 100) / 100 });
     for (const r of clear || []) if (!wanted.has(+r)) wanted.set(+r, { blank: true });
+    for (const [r, fx] of Object.entries(formulas || {})) if (!wanted.has(+r)) wanted.set(+r, { f: fx });
+    const put = (ref, tag, w) => (w.f ? formulaXml(ref, tag, w.f) : w.blank ? (tag ? blankXml(ref, tag) : '') : cellXml(ref, tag, w.v));
     if (!wanted.size) return { xml, skipped };
     const sdStart = xml.indexOf('<sheetData'), sdOpenEnd = xml.indexOf('>', sdStart) + 1;
     if (xml.slice(sdStart, sdOpenEnd).endsWith('/>')) { // empty sheetData
@@ -1487,7 +1496,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     while ((m = rowRe.exec(body))) rows.push({ start: m.index, end: m.index + m[0].length, xml: m[0], r: +attr(m[0].slice(0, m[0].indexOf('>') + 1), 'r') });
     const done = new Set();
     let out = '', pos = 0;
-    const newRow = (r) => { const w = wanted.get(r); done.add(r); return w.blank ? '' : `<row r="${r}">${cellXml(L + r, null, w.v)}</row>`; };
+    const newRow = (r) => { const w = wanted.get(r); done.add(r); return w.blank ? '' : `<row r="${r}">${put(L + r, null, w)}</row>`; };
     const pending = [...wanted.keys()].sort((x, y) => x - y);
     for (const row of rows) {
       // rows that don't exist yet, inserted in order
@@ -1506,15 +1515,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         const tag = cm[0].slice(0, cm[0].indexOf('>') + 1);
         const cref = attr(tag, 'r');
         const cc = cref ? colNum(cref.replace(/\d+/g, '')) - 1 : -1;
-        if (!placed && cc > col) { res += rx.slice(cpos, cm.index) + (w.blank ? '' : cellXml(ref, null, w.v)); cpos = cm.index; placed = true; }
+        if (!placed && cc > col) { res += rx.slice(cpos, cm.index) + (w.blank ? '' : put(ref, null, w)); cpos = cm.index; placed = true; }
         if (cc === col) {
           if (/<f\b[^>]*t="shared"[^>]*ref=/.test(cm[0])) { skipped.push(row.r); placed = true; continue; } // other cells copy this formula; leave it
-          res += rx.slice(cpos, cm.index) + (w.blank ? blankXml(ref, tag) : cellXml(ref, tag, w.v));
+          if (w.f && /<f\b/.test(cm[0])) { placed = true; continue; } // already has a formula: keep it
+          res += rx.slice(cpos, cm.index) + put(ref, tag, w);
           cpos = cm.index + cm[0].length; placed = true;
         }
       }
       const closeAt = rx.lastIndexOf('</row>');
-      res += rx.slice(cpos, closeAt) + (!placed && !w.blank ? cellXml(ref, null, w.v) : '') + '</row>';
+      res += rx.slice(cpos, closeAt) + (!placed && !w.blank ? put(ref, null, w) : '') + '</row>';
       // keep the row's declared span covering the new cell
       res = res.replace(/(<row\b[^>]*?)\sspans="(\d+):(\d+)"/, (all, pre, s1, s2) => `${pre} spans="${Math.min(+s1, col + 1)}:${Math.max(+s2, col + 1)}"`);
       out += body.slice(pos, row.start) + res;
@@ -1529,7 +1539,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const zip = await JSZip.loadAsync(bytes);
     const path = await sheetPath(zip, sheetName);
     const xml = await zip.file(path).async('string');
-    const { xml: newXml, skipped } = editSheet(xml, col, values, opts.clear || []);
+    const { xml: newXml, skipped } = editSheet(xml, col, values, opts.clear || [], opts.formulas || {});
     zip.file(path, newXml);
     // totals and subtotals recalculate when the file is opened
     let wb = await zip.file('xl/workbook.xml').async('string');
@@ -1546,6 +1556,29 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     }
     const out = await zip.generateAsync({ type: opts.type || 'blob', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     return { file: out, skipped, path };
+  };
+  /* Section subtotals and the total for the target column: copy the SUBTOTAL formula from the nearest column
+     that has one on that row (shifting its column letters), or build SUBTOTAL(9, first:last) for the total. */
+  F.subtotalFormulas = function (X, ws, master, col) {
+    const out = {}, L = colLet(col);
+    const cols = Object.values(master.yearCols).filter((c) => c !== col).sort((a, b) => Math.abs(a - col) - Math.abs(b - col));
+    const rows = master.subtotals.map((r) => r.row).concat(master.totalRow ? [master.totalRow] : []);
+    for (const r of rows) {
+      const tgt = ws[X.utils.encode_cell({ r: r - 1, c: col })];
+      if (tgt && tgt.f) continue;
+      let fx = null;
+      for (const c of cols) {
+        const src = ws[X.utils.encode_cell({ r: r - 1, c })];
+        if (src && src.f && /^\s*SUBTOTAL\s*\(\s*9\s*,/i.test(src.f)) {
+          const S = colLet(c);
+          fx = src.f.replace(new RegExp('(^|[^A-Z$!])(\\$?)' + S + '(\\$?\\d+)', 'g'), (m, pre, d1, rest) => pre + d1 + L + rest);
+          break;
+        }
+      }
+      if (!fx && r === master.totalRow) fx = `SUBTOTAL(9,${L}${master.firstRow}:${L}${master.lastRow})`;
+      if (fx) out[r] = fx;
+    }
+    return out;
   };
   F._editSheet = editSheet; F._colLet = colLet;
   if (typeof module !== 'undefined' && module.exports) module.exports = F; else root.CapexFinalize = F;
@@ -1744,7 +1777,7 @@ function resetWork() { WB = null; RESULT = null; STATE = null; $('#work').classL
 async function loadFile(f) {
   try {
     const buf = await f.arrayBuffer();
-    WB = XLSX.read(buf, { type: 'array', cellFormula: true, cellDates: false, sheetStubs: true });
+    WB = XLSX.read(buf, { type: 'array', cellFormula: true, cellDates: false, sheetStubs: true, cellStyles: true });
     WB_BYTES = buf;
   } catch (e) { toast("Couldn't read that file."); return; }
   FILE = f.name;
@@ -2028,7 +2061,9 @@ function renderFinal() {
   $('#showLeft').classList.toggle('hidden', !left);
   $('#finalNote').textContent = left ? `· ${left} of ${live.length} lines still to confirm` : `· all ${live.length} lines confirmed · ${rows} rows · $${fmt(tot)}`;
   const c = +sel.value, ws = WB.Sheets[RESULT.master.sheet];
-  const others = RESULT.master.leaves.filter((r) => !(r.row in sums)).map((r) => ({ r, x: ws[XLSX.utils.encode_cell({ r: r.row - 1, c })] })).filter((o) => o.x && typeof o.x.v === 'number' && o.x.v);
+  const mm = RESULT.master;
+  const hiddenLeaves = (mm.hiddenRows || []).filter((r) => r >= mm.firstRow && r <= mm.lastRow && !mm.subtotals.some((s) => s.row === r)).map((r) => ({ row: r, label: '(hidden row)' }));
+  const others = mm.leaves.concat(hiddenLeaves).filter((r) => !(r.row in sums)).map((r) => ({ r, x: ws[XLSX.utils.encode_cell({ r: r.row - 1, c })] })).filter((o) => o.x && typeof o.x.v === 'number' && o.x.v && !o.x.f);
   $('#finalHelp').textContent = `Downloads the workbook you uploaded with your confirmed totals in ${RESULT.master.sheet} column ${XLSX.utils.encode_col(c)}, rows ${RESULT.master.firstRow}–${RESULT.master.lastRow}: one figure per master row (lines on the same row added together), replacing what was there. Subtotal formulas, every other column and tab, and all formatting stay exactly as uploaded; totals recalculate when it opens.` +
     (al.moves.length ? ` Credits moved so no row goes negative: ${al.moves.map((mv) => `${fmt(mv.amt)} (${mv.desc.replace(/^\s*AP (Invoice|Adjust)\s*-\s*[^:]+:\s*/i, '').slice(0, 40)}) from row ${mv.from} to row ${mv.to} ${rowName(mv.to)}`).join('; ')}.` : '') +
     (al.negatives.length ? ` Row${al.negatives.length > 1 ? 's' : ''} ${al.negatives.join(', ')} would be negative and no row can absorb the credit; reassign that line before finalizing.` : '') +
@@ -2058,11 +2093,14 @@ $('#finalBtn').onclick = async () => {
   try {
     const sums = finalSums(), col = +$('#finalCol').value;
     const clear = renderFinal.others || []; // your confirmed totals replace whatever the column held before
-    const { file, skipped } = await CapexFinalize.finalize(JSZip, WB_BYTES, RESULT.master.sheet, col, sums, { clear });
+    // section subtotals and the total row get SUBTOTAL(9,…) formulas wherever the column doesn't have them yet
+    const formulas = CapexFinalize.subtotalFormulas(XLSX, WB.Sheets[RESULT.master.sheet], RESULT.master, col);
+    const { file, skipped } = await CapexFinalize.finalize(JSZip, WB_BYTES, RESULT.master.sheet, col, sums, { clear, formulas });
     const a = document.createElement('a'); a.href = URL.createObjectURL(file);
     a.download = `${PROP.replace(/[^\w ]+/g, '').trim()} ${RESULT.master.sheet} ${RESULT.target.year} finalized.xlsx`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    toast(`${Object.keys(sums).length} rows written to column ${XLSX.utils.encode_col(col)}${clear.length ? `, ${clear.length} old figure${clear.length === 1 ? '' : 's'} cleared` : ''}${skipped.length ? `; rows ${skipped.join(', ')} hold a shared formula and were left alone` : ''}.`);
+    const nf = Object.keys(formulas).length;
+    toast(`${Object.keys(sums).length} rows written to column ${XLSX.utils.encode_col(col)}${nf ? `, ${nf} SUBTOTAL formula${nf === 1 ? '' : 's'} added` : ''}${clear.length ? `, ${clear.length} old figure${clear.length === 1 ? '' : 's'} cleared` : ''}${skipped.length ? `; rows ${skipped.join(', ')} hold a shared formula and were left alone` : ''}.`);
   } catch (e) { toast("Couldn't build the file: " + (e.message || e)); }
   b.textContent = 'Finalize and download Page 1'; renderFinal();
 };
