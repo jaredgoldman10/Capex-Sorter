@@ -165,6 +165,7 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
     <div class="tabs">
       <button class="tab on" data-tab="lines">Review lines</button>
       <button class="tab" data-tab="totals">Totals by master row</button>
+      <button class="tab" data-tab="words">Category words</button>
     </div>
 
     <div id="tab-lines">
@@ -190,6 +191,17 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
       </div>
       <div class="tbl-wrap"><table id="totTbl"><thead><tr>
         <th class="num">Row</th><th>Master row</th><th class="num">Lines</th><th class="num">Sorted amount</th><th class="num" id="onMasterHdr">On master now</th><th class="num">Difference</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div id="tab-words" class="hidden">
+      <div class="toolbar">
+        <span class="muted">Each master row, the items it's read as, and your own words. A line containing one of your words always goes to that row.</span>
+        <span class="grow"></span>
+        <input type="search" id="wq" placeholder="Find a row">
+      </div>
+      <div class="tbl-wrap"><table id="wordTbl"><thead><tr>
+        <th class="num">Row</th><th>Master row</th><th>Read as</th><th>Your words (always this row)</th>
       </tr></thead><tbody></tbody></table></div>
     </div>
   </section>
@@ -830,10 +842,11 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     { id: 'laundry room', d: /laundry room/, r: /laundry room/, pen: 0.75 },
     { id: 'pool', d: /\bpool\b/, r: /\bpool\b/, pen: 0.75 },
     { id: 'exterior', d: /exterior|outside|\bsite\b|parking/, r: /exterior|\bsite\b|pole|bldg mounted/, pen: 0.5 },
-    { id: 'townhouse', d: /townho(use|me)s?/, r: /townho/, pen: 0 },
+    { id: 'townhouse', d: /townho(use|me)s?/, r: /townho/, pen: 0.75 },
     { id: 'kitchen', d: /kitchen/, r: /kitchen/, pen: 0.25 },
     { id: 'living', d: /living/, r: /living/, pen: 0.4 },
   ];
+  const UNIT_WORDS = /\bunits?\b|apartment|\bapt\b|bedroom|\b\d ?bd\b|townho(use|me)|full bath|\bbath(room)?\b|kitchen/;
   const UNIT_D = /\b\d{4} ?(r|cc)\b|\bunits?\b|apartment|\bapt\b|bedroom|\b\d ?bd\b|townho(use|me)|full bath|\bbath(room)?\b|kitchen|\b\d{2}-\d{3}\b/;
   const UNIT_R = /\bunit\b|in unit|townho/;
   const QUAL = /\b(around|for|at|in|near|behind|under|on|of|to)\b/;
@@ -909,6 +922,16 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     return found;
   }
   E._findConcepts = findConcepts;
+  // which kinds of item each master row is read as (from its own label)
+  E.rowConcepts = function (master) {
+    const out = {};
+    for (const r of master.leaves) {
+      if (!r.label) continue;
+      const t = r.label.toLowerCase();
+      out[r.row] = LEX.filter((c) => !c.place && c.w >= 3 && c.r.test(t)).map((c) => c.id);
+    }
+    return out;
+  };
 
   function rowText(r) { return ((r.label || '') + ' ' + (r.label ? '' : (r.fedBy || ''))).toLowerCase(); }
   const normLabel = (r) => (r.label || r.fedBy || '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
@@ -945,6 +968,19 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
   const HARDSCAPE = new Set(['concrete', 'patio', 'sidewalk', 'deck / balcony', 'fence', 'railing', 'stairs', 'masonry', 'paving', 'pool deck', 'painting / drywall', 'power wash']);
   const money = (v) => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
+  // the same thing written different ways, so "A/C" on a row matches "AC" on a line
+  const SYN = [[/\ba\/c\b|\bac\b/g, 'air conditioning'], [/\bdhw\b/g, 'water heater'], [/\bw\/d\b/g, 'washer dryer'], [/\bfridges?\b|\bfrig\b/g, 'refrigerator'], [/\bmi\w{0,3}waves?\b/g, 'microwave'], [/\bdisp\b/g, 'disposal'], [/\bcomm\.|\bcmmty\b/g, 'community'], [/\bbldgs?\b/g, 'building'], [/\bunnit\b/g, 'unit'], [/\bsenoir\b/g, 'senior']];
+  const stem = (w) => w.replace(/(ing|ers?|ed|ies|es|s)$/, '').slice(0, 7);
+  const litTokens = (txt) => { let t = ' ' + String(txt || '').toLowerCase() + ' '; for (const [re, rep] of SYN) t = t.replace(re, ' ' + rep + ' '); return new Set((t.match(/[a-z]{2,}/g) || []).filter((w) => !NSTOP.has(w) && w.length > 2).map(stem)); };
+  // how much of what the line literally says appears in the row's own label
+  // recall: how much of the line's item the label names; precision: how much of the label is about that item
+  const literal = (hitText, label, descText) => {
+    const a = litTokens(hitText), b = litTokens(label), d = litTokens(descText); if (!a.size || !b.size) return 0;
+    let n = 0; for (const w of a) if (b.has(w)) n++;
+    let m = 0; for (const w of b) if (d.has(w)) m++;
+    return (n / a.size) * (0.5 + 0.5 * m / b.size);
+  };
+
   E.classify = function (M, line, master) {
     const ex = M.exact[line.acct + '|' + normDesc(line.desc)];
     if (ex != null) return { row: ex, conf: 0.99, alts: [], why: 'you set this before' };
@@ -957,8 +993,12 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     const use = strong.length ? strong : named.filter((h) => h.c.w >= 3).length ? named.filter((h) => h.c.w >= 3) : named.length ? named : hits;
     const acctHist = M.acct[line.acct] || {};
     const histTot = Object.values(acctHist).reduce((a, b) => a + b, 0) || 1;
-    const inUnit = !!(line.unit && line.unit.trim()) || UNIT_D.test(desc);
+    const saysUnit = UNIT_WORDS.test(desc), hasUnitNo = !!(line.unit && line.unit.trim()) || UNIT_D.test(desc);
     const P = M.conceptPrefs || {};
+    // your own rules come first: "lines that say X go to row Y"
+    for (const ru of (M.userRules || []).slice().sort((a, b) => b.phrase.length - a.phrase.length)) {
+      if (ru.row != null && new RegExp('\\b' + ru.phrase.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(desc)) return { row: ru.row, conf: 0.99, alts: [], why: `your rule: "${ru.phrase}" → ${(leafBy[ru.row] || {}).label || ''}`.trim() };
+    }
     const share = (q, row) => (q && q.tot ? (q.rows[row] || 0) / q.tot : 0);
 
     // 1) a reversal of last year's accrual goes wherever that accrual went
@@ -980,7 +1020,10 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
         const inLabel = p.r.test(lt), rh = inLabel || p.r.test(tg), dh = p.d.test(desc);
         if (rh && dh) { s += 1; if (inLabel && p.pen > 0) place = true; } else if (rh && !dh) s -= inLabel ? p.pen : p.pen / 2;
       }
-      if (UNIT_R.test(t) && inUnit) s += 0.75;
+      // a row that names the line's own words beats one reached through a synonym or a guess
+      for (const h of why) s += 2 * literal(h.text, r.label || '', desc);
+      // in-unit rows: full credit when the line says unit/bedroom/bath, a nudge for a unit number alone
+      if (UNIT_R.test(t)) s += saysUnit ? 0.75 : hasUnitNo ? 0.3 : 0;
       const lbl = r.label || '';
       const n4 = lbl.match(/\b\d{4}\b/g); if (n4) s += n4.some((n) => desc.includes(n)) ? 1 : -0.75;
       const n2 = lbl.replace(/\b\d{4}\b/g, '').match(/\b\d{2,3}\b/g); if (n2 && !n2.some((n) => desc.includes(n))) s -= 0.4;
@@ -1117,7 +1160,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       r.fedBy = f ? Object.entries(f).sort((a, b) => b[1] - a[1])[0][0] : '';
       r.display = r.label || (r.fedBy ? `[${r.fedBy}]` : '(blank row)');
     }
-    const R = { master, target, lines: target ? E.parseGL(wb, target.name) : [], reports, history, historyCount: history.length };
+    const R = { master, target, lines: target ? E.parseGL(wb, target.name) : [], reports, history, historyCount: history.length, userRules: opts.userRules || [] };
     return E.refresh(R, opts.userExamples || []);
   };
   // re-sort after you confirm or change lines, without re-reading the workbook
@@ -1126,6 +1169,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     const M = E.train(ex);
     M.conceptPrefs = E.conceptPrefs(ex);
     M.history = R.history;
+    M.userRules = R.userRules || [];
     M.vendorAcct = {};
     for (const e of ex) { if (e.row == null) continue; const v = E.vendorKey(e.desc); if (!v) continue; const k = v + '|' + e.acct; const d = (M.vendorAcct[k] = M.vendorAcct[k] || {}); d[e.row] = (d[e.row] || 0) + (e.src === 'user' ? 3 : 1); }
     for (const l of R.lines) {
@@ -1327,8 +1371,8 @@ $('#sampleBtn').onclick = () => {
 $('#forgetBtn').onclick = async () => {
   const n = (propMem().examples || []).length;
   if (!n) return toast('No saved choices for this property.');
-  if (!confirm(`Clear your ${n} saved choices for ${PROP}? Every line will be sorted fresh.`)) return;
-  MEM.props[PROP] = { examples: [] }; await saveVault(); run(); toast('Choices cleared.');
+  if (!confirm(`Clear your ${n} saved line choices for ${PROP}? Every line will be sorted fresh. Your category words stay.`)) return;
+  MEM.props[PROP] = { examples: [], rules: propMem().rules || [] }; await saveVault(); run(); toast('Choices cleared.');
 };
 $('#changeFile').onclick = () => { resetWork(); $('#fileIn').click(); };
 function resetWork() { WB = null; RESULT = null; STATE = null; $('#work').classList.add('hidden'); drop.classList.remove('hidden'); $('#lineTbl tbody').innerHTML = ''; $('#totTbl tbody').innerHTML = ''; }
@@ -1367,7 +1411,7 @@ function run() {
   PROP = propertyName(WB, target);
   const tYear = +(/^\s*(20\d\d)/.exec(target) || [0, 0])[1];
   const userEx = userExamples(CapexEngine.parseMaster(WB, master));
-  RESULT = CapexEngine.run(WB, { master, target, userExamples: userEx });
+  RESULT = CapexEngine.run(WB, { master, target, userExamples: userEx, userRules: userRules(CapexEngine.parseMaster(WB, master)) });
   $('#propLine').textContent = `${PROP} · ${target} → ${master}`;
   // state per line
   const saved = new Map(propMem().examples.filter((e) => e.year === tYear).map((e) => [e.key, e]));
@@ -1399,7 +1443,17 @@ function userExamples(m) {
   return out;
 }
 // after you correct a line, re-sort the rest so similar lines follow your choice
+// your "always file X here" words, remapped to the current master layout
+function userRules(m) {
+  return (propMem().rules || []).map((ru) => {
+    const lf = m.leaves.find((r) => r.row === ru.row);
+    if (lf && (!ru.rowLabel || lf.label === ru.rowLabel)) return ru;
+    const hit = m.leaves.find((r) => r.label && r.label === ru.rowLabel);
+    return hit ? { ...ru, row: hit.row } : null;
+  }).filter(Boolean);
+}
 function resort() {
+  RESULT.userRules = userRules(RESULT.master);
   CapexEngine.refresh(RESULT, userExamples(RESULT.master));
   for (const s of STATE) if (!s.user) { s.row = s.l.pred.row; s.conf = s.l.pred.conf; s.split = s.l.pred.split || null; }
 }
@@ -1510,7 +1564,38 @@ async function rememberQuiet(s) {
 }
 $('#filterSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; FILTER = b.dataset.f; $$('#filterSeg button').forEach((x) => x.classList.toggle('on', x === b)); render(); });
 $('#q').addEventListener('input', () => renderLines(+$('#selThresh').value));
-$$('.tab').forEach((t) => (t.onclick = () => { $$('.tab').forEach((x) => x.classList.toggle('on', x === t)); $('#tab-lines').classList.toggle('hidden', t.dataset.tab !== 'lines'); $('#tab-totals').classList.toggle('hidden', t.dataset.tab !== 'totals'); }));
+$$('.tab').forEach((t) => (t.onclick = () => { $$('.tab').forEach((x) => x.classList.toggle('on', x === t)); ['lines', 'totals', 'words'].forEach((k) => $('#tab-' + k).classList.toggle('hidden', t.dataset.tab !== k)); if (t.dataset.tab === 'words') renderWords(); }));
+function renderWords() {
+  if (!RESULT) return;
+  const rc = CapexEngine.rowConcepts(RESULT.master), rules = propMem().rules || [], q = $('#wq').value.trim().toLowerCase();
+  let html = '', g = null;
+  for (const r of RESULT.master.leaves) {
+    const label = (r.label || r.display || '').trim();
+    const mine = rules.filter((x) => x.row === r.row);
+    if (q && !(label.toLowerCase().includes(q) || String(r.row) === q || mine.some((x) => x.phrase.includes(q)))) continue;
+    if (r.group !== g) { g = r.group; html += `<tr class="grp"><td></td><td colspan="3">${esc(g)}</td></tr>`; }
+    html += `<tr><td class="num">${r.row}</td><td>${esc(label)}</td><td class="muted" style="font-size:12px">${esc((rc[r.row] || []).join(', ') || (r.label ? '—' : 'unlabeled: past years only'))}</td><td>
+      ${mine.map((x) => `<span class="chip">${esc(x.phrase)} <button class="link" data-del="${esc(x.phrase)}" data-row="${r.row}" aria-label="Remove">×</button></span>`).join(' ')}
+      <input data-add="${r.row}" placeholder="add words…" style="padding:4px 7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);width:150px"></td></tr>`;
+  }
+  $('#wordTbl tbody').innerHTML = html;
+}
+$('#wq').addEventListener('input', renderWords);
+$('#wordTbl').addEventListener('keydown', async (e) => {
+  const t = e.target; if (e.key !== 'Enter' || !t.matches('input[data-add]')) return;
+  const phrase = t.value.trim().toLowerCase(); if (!phrase) return;
+  const row = +t.dataset.add, lf = RESULT.master.leaves.find((r) => r.row === row);
+  const pm = propMem(); pm.rules = (pm.rules || []).filter((x) => x.phrase !== phrase);
+  pm.rules.push({ phrase, row, rowLabel: lf.label || '' });
+  await saveVault(); resort(); render(); renderWords();
+  const n = STATE.filter((s) => !s.l.offset && !s.user && s.row === row && /your rule/.test(s.l.pred.why)).length;
+  toast(`"${phrase}" → row ${row}. ${n} line${n === 1 ? '' : 's'} now follow it.`);
+});
+$('#wordTbl').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-del]'); if (!b) return;
+  const pm = propMem(); pm.rules = (pm.rules || []).filter((x) => !(x.phrase === b.dataset.del && x.row === +b.dataset.row));
+  await saveVault(); resort(); render(); renderWords();
+});
 
 $('#copyTotals').onclick = async () => {
   const lines = [['Row', 'Master row', 'Group', 'Sorted amount', 'Lines', 'On master now'].join('\t')].concat(renderTotals.rows.map((r) => [r[0], r[1], r[2], r[3].toFixed(2), r[4], r[5] ? r[5].toFixed(2) : ''].join('\t')));
