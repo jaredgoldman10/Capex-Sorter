@@ -729,8 +729,8 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     // safety & security (before doors/cabinets: "door security", "first aid cabinet")
     C('first aid / safety', /(osha |type \w |class \w |certsafety )?first aid( refill)?( (cabinets?|kits?|stations?))?|fire extinguish\w*( cabinets?)?|\baed\b|eye ?wash( stations?)?|\bosha\b/, /safety/),
     C('smoke / CO / fire alarm', /smoke (alarms?|detectors?)( hard ?wire)?|carbon monoxide( (alarms?|detectors?))?|\bco (alarms?|detectors?)|fire alarms?( system)?|sounders?|horn strobes?|\bstrobes?\b|alarm panels?|alarm pan\b/, /smoke|fire alarm/),
+    C('fire system', /fire access( control)?( panels?)?|fire (systems?|sprinklers?|suppression|panels?|pumps?|safety)/, /fire system/),
     C('access control / security', /access control( panels?)?|card access|key ?fobs?|door security( system)?|entry system|security (access|system)|access doors?/, /security|access/),
-    C('fire system', /fire (systems?|sprinklers?|suppression|panels?|pumps?|safety)|fire access/, /fire system/),
     C('camera', /cameras?|\bcctv\b|\bdvr\b|\bnvr\b|surveillance/, /camera/),
     C('intercom', /intercoms?|buzzers?|call box\w*/, /intercom/),
     C('key control', /keytrak|key ?trak|key cabinets?|key control/, /keytrak/),
@@ -769,6 +769,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     C('kitchen cabinet', /cabinets?|cabinet doors?/, /kitchen cabinet|cabinets/),
     // windows, coverings, doors (blinds before flooring so "vinyl blinds" isn't flooring)
     C('blinds', /(vinyl |vertical |mini |patio )?[\dx". in]*blinds?|drapes?|draper(y|ies)|\bshades?\b|curtains?/, /blind|drape/),
+    C('slider screen', /(slider|sliding|patio)( door)? screens?|(slider|sliding|patio) screen doors?/, /slid|patio door/),
     C('screen door', /((slider|sliding|patio) )?((patio |slider )?door screens?|screen doors?)|storm doors?/, /screen door|storm door/),
     C('window screen', /(window )?screens?/, /screen/),
     C('sliding door', /(patio|sliding|slider) ?(glass )?doors?|((patio|sliding) )?\bsliders?\b|sliding glass|patio glass/, /slid|patio door/),
@@ -896,6 +897,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     return ' ' + d
       .replace(/reversed\s*--/, ' ').replace(/\bpc--[^-]*--/, ' ') + ' ';
   }
+  const EQUIP = new Set(['water heater', 'boiler', 'air conditioning', 'elevator', 'washer/dryer', 'range', 'refrigerator', 'dishwasher', 'microwave', 'disposal', 'toilet', 'tub / shower', 'exhaust fan', 'generator', 'irrigation', 'vehicle', 'golf cart', 'maintenance equipment', 'computer']);
   const ACTION = new Set(['painting / drywall', 'power wash', 'dryer vent', 'trim / siding']);
   const clauseBounds = (orig, pos) => {
     const st = Math.max(orig.lastIndexOf(',', pos), orig.lastIndexOf(';', pos), orig.lastIndexOf(' - ', pos), orig.lastIndexOf('/', pos));
@@ -935,6 +937,17 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       }
     }
     found.sort((a, b) => a.pos - b.pos);
+    // "replaced induction motor on water heater #2": the part was on the water heater, so the water heater is the item
+    for (const o of found) {
+      if (!EQUIP.has(o.c.id)) continue;
+      const lead = orig.slice(Math.max(0, o.pos - 14), o.pos);
+      if (!/\b(on|for|of|to)\s+(the\s+|a\s+|an\s+)?(\w+\s+)?$/.test(lead)) continue;
+      const [cs] = clauseBounds(orig, o.pos);
+      const parts = found.filter((p) => p !== o && p.pos < o.pos && p.pos >= cs - 1 && !ACTION.has(p.c.id));
+      if (!parts.length) continue;
+      o.qual = false; o.subject = true;
+      for (const p of found) if (p !== o && !ACTION.has(p.c.id) && !EQUIP.has(p.c.id)) p.qual = true;
+    }
     // "paint basement and interior doors": what follows an action word in the same clause is what got painted
     for (const h of found) if (ACTION.has(h.c.id)) {
       const [, ce] = clauseBounds(orig, h.pos);
@@ -1014,6 +1027,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     const use = strong.length ? strong : named.filter((h) => h.c.w >= 3).length ? named.filter((h) => h.c.w >= 3) : named.length ? named : hits;
     const acctHist = M.acct[line.acct] || {};
     const histTot = Object.values(acctHist).reduce((a, b) => a + b, 0) || 1;
+    const acctLow = String(line.acctName || '').toLowerCase();
     const saysUnit = UNIT_WORDS.test(desc), hasUnitNo = !!(line.unit && line.unit.trim()) || UNIT_D.test(desc);
     const P = M.conceptPrefs || {};
     // your own rules come first: "lines that say X go to row Y"
@@ -1033,13 +1047,14 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     const scored = [];
     for (const r of master.leaves) {
       const t = rowText(r); if (!t.trim()) continue;
-      let s = 0, place = false; const why = [];
+      let s = 0, place = false, offPlace = ''; const why = [];
       for (const h of use) if (h.c.r.test(t)) { s += h.qual ? 1 : h.c.w; why.push(h); }
       if (!s) continue;
       const lt = (r.label || '').toLowerCase(), tg = lt + ' ' + String(r.group || '').toLowerCase();
       for (const p of PLACES) {
-        const inLabel = p.r.test(lt), rh = inLabel || p.r.test(tg), dh = p.d.test(desc);
-        if (rh && dh) { s += 1; if (inLabel && p.pen > 0) place = true; } else if (rh && !dh) s -= inLabel ? p.pen : p.pen / 2;
+        // the GL account can state the place too ("Office Furniture & Equip", "Exterior - Doors")
+        const inLabel = p.r.test(lt), rh = inLabel || p.r.test(tg), dh = p.d.test(desc) || p.d.test(acctLow);
+        if (rh && dh) { s += 1; if (inLabel && p.pen > 0) place = true; } else if (rh && !dh) { s -= inLabel ? p.pen : p.pen / 2; if (inLabel && p.pen >= 0.5) offPlace = p.id; }
       }
       // a row that names the line's own words beats one reached through a synonym or a guess
       for (const h of why) s += 2 * literal(h.text, r.label || '', desc);
@@ -1053,7 +1068,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       let pref = 0, hist = 0;
       for (const h of why) { const p = P[h.c.id]; if (p) { pref = Math.max(pref, 1.5 * share(p.user, r.row)); hist = Math.max(hist, share(p.hist, r.row)); } }
       s += pref + 0.1 * (sim(line.acctName, lbl || r.fedBy || '') + sim(line.acctName, r.group || ''));
-      scored.push({ row: r.row, s, why, pref, hist, place, acct: (acctHist[r.row] || 0) / histTot, label: name(r.row), norm: normLabel(r), group: r.group });
+      scored.push({ row: r.row, s, why, pref, hist, place, offPlace, labeled: !!r.label, acct: (acctHist[r.row] || 0) / histTot, label: name(r.row), norm: normLabel(r), group: r.group });
     }
     scored.sort((a, b) => b.s - a.s);
 
@@ -1080,7 +1095,11 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       // rows with the same label are one choice; within them take the one used before
       const distinct = [];
       for (const x of tied) { const g = distinct.find((d) => d.norm === x.norm); if (!g) distinct.push(x); else if (better(x, g) < 0) distinct[distinct.indexOf(g)] = x; }
-      if (distinct.length <= 1) return { row: distinct[0].row, conf: 0.95, why: `${label} → ${distinct[0].label}` };
+      if (distinct.length <= 1) {
+        const d0 = distinct[0];
+        if (d0.offPlace) return { row: d0.row, conf: 0.7, why: `${label} → ${d0.label} (the only row for this item is marked ${d0.offPlace}; the line doesn't say ${d0.offPlace})` };
+        return { row: d0.row, conf: 0.95, why: `${label} → ${d0.label}` };
+      }
       const byHist = distinct.slice().sort(better);
       const h = byHist[0];
       if (h.hist > 0 || h.acct > 0) return { row: h.row, conf: 0.85, why: `${label} → ${h.label} (${distinct.length} rows fit; past years filed it here)` };
@@ -1093,7 +1112,9 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       // one target per distinct row the items point to
       const targets = [];
       for (const h of items) {
-        const own = scored.filter((x) => x.why.includes(h)).map((x) => ({ ...x, s: x.s - x.why.filter((o) => o !== h).reduce((a, o) => a + wt(o), 0) }));
+        let own = scored.filter((x) => x.why.includes(h)).map((x) => ({ ...x, s: x.s - x.why.filter((o) => o !== h).reduce((a, o) => a + wt(o), 0) }));
+        // a row whose own label names the item beats an unlabeled row known only from past years
+        if (own.some((x) => x.labeled)) own = own.filter((x) => x.labeled);
         const b = own.length ? settle(own, '') : null;
         const bx = b ? scored.find((x) => x.row === b.row) : null;
         const t = bx ? { row: bx.row, group: bx.group, norm: bx.norm } : familyRow(h);
@@ -1136,7 +1157,8 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
         const lead = t.items.map((h) => `"${h.text}"`).join(', ');
         if (t.family) out = { row: t.row, conf: 0.85, why: `${lead}: no row of its own on the master tab; filed with ${name(t.row)}` };
         else {
-          const cands = scored.filter((x) => t.items.some((h) => x.why.includes(h)));
+          let cands = scored.filter((x) => t.items.some((h) => x.why.includes(h)));
+          if (cands.some((x) => x.labeled)) cands = cands.filter((x) => x.labeled);
           out = settle(cands.length ? cands : scored, lead);
           if (t.items.every((h) => h.c.w < 3)) out.conf = Math.min(out.conf, 0.8);
         }
