@@ -150,7 +150,7 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
 
   <section id="work" class="hidden">
     <div class="panel" style="margin-top:14px">
-      <div class="row"><b id="fileName" class="grow"></b><button class="btn ghost" id="changeFile">Load a different file</button></div>
+      <div class="row"><b id="fileName" class="grow"></b><button class="btn ghost" id="forgetBtn" title="Clear the lines you confirmed for this property">Clear my choices</button><button class="btn ghost" id="changeFile">Load a different file</button></div>
       <div class="setup">
         <label><span>Master capex tab</span><select id="selMaster"></select></label>
         <label><span>GL tab to categorize</span><select id="selTarget"></select></label>
@@ -1205,6 +1205,12 @@ $('#fileIn').onchange = (e) => { if (e.target.files[0]) loadFile(e.target.files[
 $('#sampleBtn').onclick = () => {
   const bytes = Uint8Array.from(atob(window.CAPEX_SAMPLE || ''), (c) => c.charCodeAt(0));
   loadFile({ name: 'Sample Property Capital Plan.xlsx', arrayBuffer: async () => bytes.buffer });
+};
+$('#forgetBtn').onclick = async () => {
+  const n = (propMem().examples || []).length;
+  if (!n) return toast('No saved choices for this property.');
+  if (!confirm(`Clear your ${n} saved choices for ${PROP}? Every line will be sorted fresh.`)) return;
+  MEM.props[PROP] = { examples: [] }; await saveVault(); run(); toast('Choices cleared.');
 };
 $('#changeFile').onclick = () => { resetWork(); $('#fileIn').click(); };
 function resetWork() { WB = null; RESULT = null; STATE = null; $('#work').classList.add('hidden'); drop.classList.remove('hidden'); $('#lineTbl tbody').innerHTML = ''; $('#totTbl tbody').innerHTML = ''; }
