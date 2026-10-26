@@ -316,14 +316,15 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     const rows = [];
     for (let r = startRow; r <= endRow; r++) {
       const label = txt(val(ws, r, labelCol));
-      let isSub = false;
+      let subs = 0;
       const values = {};
       for (const [y, c] of Object.entries(yearCols)) {
         const x = cell(ws, r, c);
-        if (x && x.f && /SUBTOTAL/i.test(x.f)) isSub = true;
+        if (x && x.f && /SUBTOTAL/i.test(x.f)) subs++;
         const n = x ? num(x.v) : null;
         if (n != null) values[y] = n;
       }
+      const isSub = subs >= 2; // one stray SUBTOTAL in a projection column doesn't make a subtotal row
       rows.push({ row: r + 1, label, isSub, values });
     }
     // assign groups: each leaf belongs to the next subtotal row below it
@@ -684,24 +685,319 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     return { row: scores[0].row, conf, alts: scores.slice(1, 4).map((x) => ({ row: x.row, p: x.p })), why: A ? 'GL account history + description' : 'new GL account: best guess by name' };
   };
 
+  /* ---------- meaning-based classifier ----------
+     Reads what was bought or done in the description and matches it to the master row whose label
+     names that thing. The GL account and past years only break ties between rows that fit equally. */
+  const C = (id, d, r, w = 3, extra = {}) => Object.assign({ id, d, r, w }, extra);
+  // Order matters: specific phrases come first and are masked out so that, e.g., "range hood"
+  // is not also read as "range", or "dryer vent" as "dryer".
+  const LEX = [
+    // pool items (before backflow/pump/heater so pool equipment stays pool equipment)
+    C('pool equipment', /pool[^,;]{0,25}(pumps?|filters?|heaters?|equipment|chlorinat\w*|backflow\w*( preventers?)?|motors?)|(pumps?|filters?|heaters?|chlorinat\w*|backflow preventers?)[^,;]{0,25}pool/, /pool\s*equip/),
+    C('pool restroom', /pool[^,;]{0,20}(restrooms?|bathrooms?)|(restrooms?|bathrooms?)[^,;]{0,20}pool/, /pool\s*rest/),
+    C('pool deck', /pool decks?/, /pool deck|pool & pool deck/),
+    // safety & security (before doors/cabinets: "door security", "first aid cabinet")
+    C('first aid / safety', /(osha |type \w |class \w |certsafety )?first aid( refill)?( (cabinets?|kits?|stations?))?|fire extinguish\w*( cabinets?)?|\baed\b|eye ?wash( stations?)?|\bosha\b/, /safety/),
+    C('smoke / CO / fire alarm', /smoke (alarms?|detectors?)( hard ?wire)?|carbon monoxide( (alarms?|detectors?))?|\bco (alarms?|detectors?)|fire alarms?( system)?|sounders?|horn strobes?|\bstrobes?\b/, /smoke|fire alarm/),
+    C('access control / security', /access control( panels?)?|card access|key ?fobs?|door security( system)?|entry system|security (access|system)|access doors?/, /security|access/),
+    C('fire system', /fire (systems?|sprinklers?|suppression|panels?|pumps?)|fire access/, /fire system/),
+    C('camera', /cameras?|\bcctv\b|\bdvr\b|\bnvr\b|surveillance/, /camera/),
+    C('intercom', /intercoms?|buzzers?|call box\w*/, /intercom/),
+    C('key control', /keytrak|key ?trak|key cabinets?|key control/, /keytrak/),
+    C('fire stopping', /(stove ?top )?fire ?stop\w*/, /fire stop/),
+    // appliances
+    C('range hood', /range ?hoods?|vent ?hoods?|hood vents?/, /range ?hood/),
+    C('dishwasher', /dish ?washers?/, /dish ?washer/),
+    C('dryer vent', /dryer vents?|vent clean ?outs?|vent cleaning/, /dryer vent/),
+    C('dryer outlet', /dryer (outlets?|receptacles?|plugs?)( installation)?/, /electrical(?!\s*panel)/),
+    C('microwave', /((counter ?top|over[- ]the[- ]range|otr) )?\bmi\w{0,3}waves?\b/, /microwave/),
+    C('range', /\b((coil|glass ?top|electric|gas) )?(ranges?|stoves?|ovens?|cook ?tops?)\b/, /\brange\b(?!\s*hood)|stove|oven/),
+    C('refrigerator', /refrigerators?|\bfridges?\b|\bfrig\b|refrig\w*/, /refrigerator|fridge/),
+    C('disposal', /(garbage )?disposals?|disposers?/, /disposal/),
+    C('washer/dryer', /\bwashers?\b|\bdryers?\b|washer ?\/ ?dryer|\bw\/d\b/, /washer|dryer(?!\s*vent)/),
+    C('appliance', /appliances?/, /appliance/, 2),
+    // HVAC & water heating
+    C('water heater', /water heaters?|hot water (tanks?|heaters?)|\bdhw\b/, /water heater|\bdhw\b/),
+    C('boiler pump/piping', /(boiler )?(circulat\w*|circ) ?pumps?|boiler pumps?|boiler (piping|pipes?|valves?)|mixing valves?|expansion tanks?/, /piping|pumps?/),
+    C('backflow', /back ?flow\w*( preventers?)?/, /back ?flow|black flow/),
+    C('boiler', /boilers?/, /boiler/),
+    C('furnace', /furnaces?|inducers?( motors?)?|induction motors?|ignit[oe]rs?|flame sensors?|control boards?|digital controllers?|gas valves?|pressure switch\w*|limit switch\w*|heat exchang\w*|blower motors?/, /furnace/),
+    C('air conditioning', /\ba\/?c\b( units?)?|air condition\w*|condens(er|ing units?)|compressors?|refrigerant|freon|thru-?wall|heat pumps?|mini ?splits?|\bptac\b/, /\ba\/c\b|\bac\b|air condition|\bhac\b/),
+    C('radiation', /radiators?|radiation|baseboard heat\w*|zone (motors?|valves?)|radiator valves?/, /radiation|radiator/),
+    C('exhaust fan', /exhaust fans?( motors?)?|bath(room)? fans?|vent fans?|ventilation/, /ventilation|exhaust/),
+    // plumbing
+    C('cartridge', /(tub|shower|faucet|valve) cartridges?|cartridges?/, /plumbing fixture/),
+    C('shower head', /shower ?heads?/, /plumbing fixture/),
+    C('vanity / bath sink', /vanit(y|ies)|(undermount )?bathroom sinks?|undermount\w*|lavator(y|ies)/, /vanit/),
+    C('medicine cabinet', /(mirrored )?medicine cabinets?/, /medicine cabinet/),
+    C('tub / shower', /\btubs?\b( and)?( surrounds?)?|bath ?tubs?|shower (surrounds?|pans?|valves?|stalls?|walls?)|\bsurrounds?\b|\bshowers?\b/, /\btub|shower/),
+    C('toilet', /toilets?( (seats?|tanks?|handles?|rounds?))?|commodes?|fill valves?|flappers?|wax rings?/, /toilet/),
+    C('faucet / fixture', /faucets?|supply lines?|aerators?|\bsinks?\b|p-?traps?|drain (lines?|assembl\w*|kits?)/, /plumbing fixture/),
+    C('water main / underground pipe', /water mains?|underground (pipes?|lines?|piping)|water (line )?leaks?|main lines?|sewer (lines?|mains?)|water meter leaks?|building piping/, /underground pipe|water leak|water main/),
+    // cabinets & counters
+    C('countertop', /counter ?tops?|backsplash\w*/, /countertop/),
+    C('kitchen cabinet', /cabinets?|cabinet doors?/, /kitchen cabinet|cabinets/),
+    // windows, coverings, doors (blinds before flooring so "vinyl blinds" isn't flooring)
+    C('blinds', /(vinyl |vertical |mini |patio )?[\dx". in]*blinds?|drapes?|draper(y|ies)|\bshades?\b|curtains?/, /blind|drape/),
+    C('screen door', /((slider|sliding|patio) )?((patio |slider )?door screens?|screen doors?)|storm doors?/, /screen door|storm door/),
+    C('window screen', /(window )?screens?/, /screen/),
+    C('sliding door', /(patio|sliding|slider) ?(glass )?doors?|((patio|sliding) )?\bsliders?\b|sliding glass|patio glass/, /slid|patio door/),
+    C('glass', /((front|entry|door|window|kitchen)\s+)*glass\w*|glazing|\bpanes?\b/, /glass/),
+    C('flooring', /carpet\w*|\bvinyl\b|\blvp\b|\blvt\b|laminate|floor(ing|s)?\b|\btiles?\b|sub-?floor\w*|\bvct\b/, /floor|carpet/),
+    C('fireproof door', /fire ?(proof|rated) doors?/, /fire ?proof|fire door/),
+    C('garage door', /garage doors?/, /garage door/),
+    C('entry door', /(front|entry|entrance|exterior|main|building|bldg|common|service) (entry )?doors?|entry doors?/, /((exterior|entrance|main|common|service|front)\b.*doors?|doors?.*(senior|walk up))/),
+    C('interior door', /(interior|bathroom|basement|bedroom|closet|pantry|laundry) doors?|bi[- ]?folds?( doors?)?|closet doors?|6 panel|six panel|bedroom doors?|pre-?hung|door slabs?/, /unit doors?|interior doors?/),
+    C('lock / hardware', /\blocks?\b|deadbolts?|lever sets?|re-?key\w*|master key\w*|locksets?|lock shop/, /\block/),
+    C('door', /\bdoors?\b/, /\bdoors?\b/, 2),
+    C('window', /windows?/, /window/),
+    // electrical & lighting
+    C('electrical panel', /electrical panels?|breaker panels?|panel upgrades?|service panels?|load centers?/, /electrical panel/),
+    C('meter bank', /meter (banks?|bases?|sockets?)/, /meter/),
+    C('exterior lighting', /pole lights?|site light\w*|parking lot light\w*|wall ?packs?|exterior light\w*|flood ?lights?/, /site lighting|pole|bldg mounted|exterior light/),
+    C('lighting', /light (fixtures?|bulbs?)|\bbulbs?\b|\bfixtures?\b|chandeliers?|ceiling fans?|\bled\b|\blamps?\b|\bt8\b|halogen|lighting/, /light|ceiling fan/),
+    C('electrical', /outlets?|receptacles?|breakers?|switch(es)?\b|switch covers?|wiring|rewir\w*|electrical|electrician|gfci|wall plates?|conduit/, /electrical(?!\s*panel)/),
+    C('generator', /generators?/, /generator/),
+    // elevator
+    C('elevator cab', /\bcabs?\b|cab interior/, /\bcabs?\b/),
+    C('elevator', /elevators?|spirators?|hoistway/, /elevator/),
+    // painting & exterior envelope
+    C('painting / drywall', /paint\w*|\bprime\b|primer|priming|drywall( repairs?)?|spackl\w*|sheet ?rock|\bpatch(ed|ing)?\b/, /paint/),
+    C('trim / siding', /\btrim\b|soffits?|fascia|siding|hardie/, /trim|soffit|siding/),
+    C('power wash', /power ?wash\w*|pressure ?wash\w*|mildew/, /power ?wash/),
+    C('roof', /\broof\w*|shingles?|flashing|membrane/, /\broof/),
+    C('gutters', /gutters?|downspouts?/, /gutter/),
+    C('paving', /asphalt|paving|\bpave\b|seal ?coat\w*|parking lot|striping|crack ?fill\w*/, /paving|asphalt|sealcoat/),
+    C('sidewalk', /sidewalks?|walkways?/, /sidewalk/),
+    C('patio', /patios?/, /patio(?!\s*fence)/),
+    C('concrete', /concrete|\bcurbs?\b|flat ?work/, /concrete/),
+    C('masonry', /masonry|\bbrick\w*|tuck ?point\w*|mortar|block walls?/, /masonry|brick/),
+    C('stairs', /\bstairs?\b|\bsteps\b|stairways?/, /stair/),
+    C('railing', /railings?|handrails?/, /railing/),
+    C('fence', /fenc(e|es|ing)/, /fenc/),
+    C('dumpster enclosure', /dumpsters?( enclosures?)?|trash enclosures?/, /dumpster/),
+    C('signage', /\bsigns?\b|signage|monument/, /\bsign/),
+    C('mailboxes', /mail ?box\w*|mail facilit\w*|\bcbus?\b|cluster box\w*/, /mail/),
+    C('playground', /playground|play (area|equipment)|swing sets?/, /play/),
+    C('awning', /awnings?|canop(y|ies)/, /awning/),
+    C('support column', /columns?|support posts?/, /column/),
+    C('deck / balcony', /\bdecks?\b|balcon(y|ies)/, /\bdeck|balcon/),
+    // grounds
+    C('mulch / soil / seed', /(black |brown |red )?mulch\w*|top ?soil|\bsoil\b|grass seed|\bseed(ing)?\b|\bsod\b|stumps?( grinding)?/, /stump|soil|seed|mulch/),
+    C('tree work', /\btrees?\b( (removal|trimming))?|prun\w*/, /\btree/),
+    C('irrigation', /irrigation( system)?|sprinklers?( (heads?|lines?|system))?/, /irrigation|sprinkler/),
+    C('retaining wall', /retaining walls?/, /retaining wall/),
+    C('drainage', /drainage|catch basins?|storm drains?|french drains?|grading/, /drainage/),
+    C('landscaping', /landscap\w*|hedges?|\bbush(es)?\b|shrubs?|planting|plants?\b|flowers?|perennials?|annuals|clean ?up|grounds|lawn|edging/, /landscap/),
+    // equipment, vehicles, office
+    C('vehicle', /\btrucks?\b|vehicles?|transmission|chevrolet|\bford\b|\bvan\b|trailers?/, /truck|trailer|vehicle/),
+    C('golf cart', /golf carts?|utility carts?|\bgator\b/, /golf cart/),
+    C('maintenance equipment', /kubota|tractors?|loaders?|mowers?|snow ?blowers?|\bplows?\b|power pusher( dumpster( mover)?)?|skid steer|equipment rental|\btools?\b|radios?|vermeer|pressure washers?|leaf blowers?|ladders?/, /maint\w* equip/),
+    C('computer', /computers?|laptops?|desktops?|monitors?|printers?|servers?|tablets?|ipads?|software/, /computer/),
+    C('office furniture & equipment', /\bdesks?\b|office chairs?|office furniture|filing cabinets?|coffee (machine|maker)s?|nespresso|keurig|copiers?|shredders?/, /office furn|office equip/),
+    C('furniture', /furniture|lounge|sofas?|couch(es)?|\btables?\b|\bchairs?\b/, /furniture|tables and chairs/),
+    // places used as a last resort when nothing else is named
+    C('pool', /\bpool\b/, /\bpool\b/, 2, { place: true }),
+    C('recreation', /fitness|\bgym\b|recreation\w*|rec room|tennis|basketball/, /recreation/, 2, { place: true }),
+  ];
+  // when a workbook has no row for the exact item, fall back to the row for its broader kind
+  const FAMILY = [
+    [/range|refrigerator|microwave|disposal|dishwasher|washer|appliance/, /appliance/],
+    [/water heater|boiler|backflow|furnace|air conditioning|radiation|exhaust/, /hvac|heating|furnace|air condition|boiler/],
+    [/cartridge|shower|vanity|tub|toilet|faucet|water main/, /plumbing|\bbath/],
+    [/cabinet|countertop/, /cabinet|countertop/],
+    [/door|lock/, /\bdoors?\b/],
+    [/blinds|screen|glass|window/, /window|screen|glass/],
+    [/electrical|meter|lighting|generator/, /electric|light/],
+    [/first aid|smoke|access|fire|camera|intercom|key/, /safety|security|fire|smoke/],
+    [/elevator/, /elevator/],
+    [/painting|trim|power wash/, /paint|repair/],
+    [/roof|gutter/, /roof|gutter/],
+    [/paving|sidewalk|patio|concrete|masonry|stairs|railing|fence|dumpster|signage|mailbox|playground|awning|column|deck/, /exterior|masonry|concrete|misc\. exterior/],
+    [/mulch|tree|irrigation|retaining|drainage|landscaping/, /landscap|grounds/],
+    [/vehicle|golf cart|maintenance equipment/, /equip|vehicle|truck/],
+    [/computer|office/, /office|computer/],
+    [/furniture/, /furniture/],
+  ];
+  // places qualify a row; they never pick the row when an item is named
+  const PLACES = [
+    { id: 'senior', d: /senior|elderly/, r: /senior|senoir|elderly/, pen: 0.75 },
+    { id: 'office', d: /\boffice\b/, r: /\boffice\b/, pen: 0.75 },
+    { id: 'hallway', d: /hallway|corridor/, r: /hallway/, pen: 0.75 },
+    { id: 'stair', d: /\bstair/, r: /\bstair/, pen: 0.75 },
+    { id: 'common', d: /community|clubhouse|comm\.? ?(room|bldg|building)|common area|lobby/, r: /comm\.|cmmty|common|clubhouse|community|lobby/, pen: 0.75 },
+    { id: 'laundry room', d: /laundry room/, r: /laundry room/, pen: 0.75 },
+    { id: 'pool', d: /\bpool\b/, r: /\bpool\b/, pen: 0.75 },
+    { id: 'exterior', d: /exterior|outside|\bsite\b|parking/, r: /exterior|\bsite\b|pole|bldg mounted/, pen: 0.5 },
+    { id: 'townhouse', d: /townho(use|me)s?/, r: /townho/, pen: 0 },
+    { id: 'kitchen', d: /kitchen/, r: /kitchen/, pen: 0.25 },
+    { id: 'living', d: /living/, r: /living/, pen: 0.4 },
+  ];
+  const UNIT_D = /\b\d{4} ?(r|cc)\b|\bunits?\b|apartment|\bapt\b|bedroom|\b\d ?bd\b|townho(use|me)|full bath|\bbath(room)?\b|kitchen|\b\d{2}-\d{3}\b/;
+  const UNIT_R = /\bunit\b|in unit|townho/;
+  const QUAL = /\b(around|for|at|in|near|behind|under|on|of|to)\b/;
+  const GENERIC_R = /as needed|\bmisc|general|allowance/;
+
+  // vendor names say who, not what ("Modern Landscape" did tree work; that isn't landscaping)
+  let VENDOR_RE = null;
+  E.setVendors = function (names) {
+    const parts = [...new Set(names.map((n) => String(n).toLowerCase().replace(/\b(llc|inc|co|corp|company|ltd|maintltd|the|credit services|services?)\b|[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 2).join(' ')).filter((v) => v.split(' ').length === 2 && v.length > 5))];
+    VENDOR_RE = parts.length ? new RegExp('\\b(' + parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b[^,;:]{0,40}?(llc|inc|co\\b|company)?', 'g') : null;
+  };
+  function cleanDesc(desc) {
+    let d = String(desc || '').toLowerCase()
+      .replace(/^\s*(ap invoice|ap adjust)\s*-\s*[^:]+:/, ' ')
+      .replace(/reclass entry:\s*[\d.\-]+\s*-?\s*((ap invoice\s*-\s*)?[^:]{0,60}:)?/, ' ');
+    if (VENDOR_RE) d = d.replace(VENDOR_RE, (m, v) => ' '.repeat(v.length) + m.slice(v.length));
+    return ' ' + d
+      .replace(/reversed\s*--/, ' ').replace(/\bpc--[^-]*--/, ' ') + ' ';
+  }
+  function findConcepts(desc) {
+    const orig = cleanDesc(desc);
+    let s = orig;
+    const found = [];
+    for (const c of LEX) {
+      const re = new RegExp(c.d.source, 'g');
+      let m, hit = null;
+      while ((m = re.exec(s))) {
+        if (!m[0].trim()) { re.lastIndex++; continue; }
+        if (!hit) hit = { c, pos: m.index, text: m[0].trim() };
+        s = s.slice(0, m.index) + ' '.repeat(m[0].length) + s.slice(m.index + m[0].length);
+      }
+      if (hit) {
+        // "paint walls around new tub surround": the tub is where, not what
+        const clauseStart = Math.max(orig.lastIndexOf(',', hit.pos), orig.lastIndexOf(';', hit.pos), orig.lastIndexOf('(', hit.pos), orig.lastIndexOf(' - ', hit.pos));
+        const before = orig.slice(clauseStart + 1, hit.pos);
+        hit.qual = QUAL.test(before) && /[a-z]{3,}/.test(before.replace(QUAL, ''));
+        found.push(hit);
+      }
+    }
+    return found.sort((a, b) => a.pos - b.pos);
+  }
+  E._findConcepts = findConcepts;
+
+  function rowText(r) { return ((r.label || '') + ' ' + (r.label ? '' : (r.fedBy || ''))).toLowerCase(); }
+  const normLabel = (r) => (r.label || r.fedBy || '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+
+  // what each concept has meant on this master tab before (history lightly, your confirmations strongly)
+  E.conceptPrefs = function (examples) {
+    const P = {};
+    for (const e of examples) {
+      if (e.row == null) continue;
+      const k = e.src === 'user' ? 'user' : 'hist';
+      for (const h of findConcepts(e.desc)) {
+        if (h.qual) continue;
+        const p = (P[h.c.id] = P[h.c.id] || { hist: { tot: 0, rows: {} }, user: { tot: 0, rows: {} } })[k];
+        p.rows[e.row] = (p.rows[e.row] || 0) + (e.w || 1); p.tot += e.w || 1;
+      }
+    }
+    return P;
+  };
+
+  E.classify = function (M, line, master) {
+    const ex = M.exact[line.acct + '|' + normDesc(line.desc)];
+    if (ex != null) return { row: ex, conf: 0.99, alts: [], why: 'you set this before' };
+    const desc = cleanDesc(line.desc);
+    const hits = findConcepts(line.desc);
+    const named = hits.filter((h) => !h.c.place);
+    const strong = named.filter((h) => h.c.w >= 3);
+    const use = strong.length ? strong : named.length ? named : hits;
+    const acctHist = M.acct[line.acct] || {};
+    const histTot = Object.values(acctHist).reduce((a, b) => a + b, 0) || 1;
+    const inUnit = !!(line.unit && line.unit.trim()) || UNIT_D.test(desc);
+    const P = M.conceptPrefs || {};
+    const scored = [];
+    for (const r of master.leaves) {
+      const t = rowText(r); if (!t.trim()) continue;
+      let s = 0; const why = [];
+      for (const h of use) if (h.c.r.test(t)) { s += h.qual ? 1 : h.c.w; why.push(h); }
+      if (!s) continue;
+      const lt = (r.label || '').toLowerCase(), tg = lt + ' ' + String(r.group || '').toLowerCase(); // the row's section also says where it applies
+      for (const p of PLACES) {
+        const inLabel = p.r.test(lt), rh = inLabel || p.r.test(tg), dh = p.d.test(desc);
+        if (rh && dh) s += 1; else if (rh && !dh) s -= inLabel ? p.pen : p.pen / 2;
+      }
+      if (UNIT_R.test(t) && inUnit) s += 0.75;
+      const lbl = r.label || '';
+      const n4 = lbl.match(/\b\d{4}\b/g); if (n4) s += n4.some((n) => desc.includes(n)) ? 1 : -0.75;
+      const n2 = lbl.replace(/\b\d{4}\b/g, '').match(/\b\d{2,3}\b/g); if (n2 && !n2.some((n) => desc.includes(n))) s -= 0.4;
+      if (GENERIC_R.test(t)) s += 0.2;
+      // the more of the label the description accounts for, the better the fit
+      const nt = nameTokens(lbl).size;
+      s += lbl ? 0.6 / Math.max(1, nt - 1) : 0.35;
+      // tie-breakers: how this kind of item was filed before, same GL account family, past use by this account
+      let pref = 0;
+      for (const h of why) {
+        const p = P[h.c.id]; if (!p) continue;
+        const share = (q) => (q.tot ? (q.rows[r.row] || 0) / q.tot : 0);
+        pref = Math.max(pref, 0.2 * share(p.hist) + 1.5 * share(p.user));
+      }
+      s += pref;
+      s += 0.1 * (sim(line.acctName, lbl || r.fedBy || '') + sim(line.acctName, r.group || ''));
+      s += 0.15 * ((acctHist[r.row] || 0) / histTot);
+      scored.push({ row: r.row, s, why, pref, label: (r.label || r.display || '').trim(), norm: normLabel(r) });
+    }
+    scored.sort((a, b) => b.s - a.s);
+    if (scored.length) {
+      const primary = use.filter((h) => !h.qual);
+      // a line naming several different things: file under the first one, and say so
+      const wt = (h) => (h.qual ? 1 : h.c.w);
+      const rowsFor = (h) => scored.filter((x) => x.why.includes(h)).map((x) => ({ x, own: x.s - x.why.filter((o) => o !== h).reduce((a, o) => a + wt(o), 0) })).sort((a, b) => b.own - a.own).map((y) => y.x);
+      const distinct = [];
+      for (const h of primary) {
+        const best = rowsFor(h)[0];
+        const key = best ? best.norm : 'none:' + h.c.id;
+        if (!distinct.some((d) => d.key === key) && !(h.c.w < 3 && primary.some((o) => o !== h && o.c.w >= 3))) distinct.push({ h, key, best });
+      }
+      let top = scored[0];
+      const mixed = distinct.length > 1;
+      if (mixed && distinct[0].best) top = distinct[0].best;
+      const second = scored.find((x) => x.norm !== top.norm);
+      const lead = top.why.filter((h) => !h.qual).map((h) => `"${h.text}"`).join(', ') || top.why.map((h) => `"${h.text}"`).join(', ');
+      const margin = second ? top.s - second.s : 9;
+      const genericOnly = top.why.every((h) => h.c.w < 3);
+      let conf, why;
+      if (mixed) {
+        conf = 0.55;
+        why = `names several things (${distinct.map((d) => `"${d.h.text}"`).join(', ')}); filed under the first, amount isn't split`;
+      } else if (margin >= 1) { conf = 0.95; why = `${lead} → ${top.label}`; }
+      else if (margin >= 0.4 || top.pref >= 1) { conf = 0.85; why = `${lead} → ${top.label}${top.pref >= 1 ? ' (as you filed it before)' : ''}`; }
+      else { conf = 0.65; why = `${lead} fits several rows (${[top, ...scored.filter((x) => x.norm !== top.norm).slice(0, 2)].map((x) => x.label).join(' / ')})`; }
+      if (genericOnly) conf = Math.min(conf, 0.65);
+      return { row: top.row, conf, alts: scored.filter((x) => x.row !== top.row).slice(0, 3).map((x) => ({ row: x.row })), why };
+    }
+    // the item has no row of its own: use the row for its broader kind, preferring this account's section
+    const label = hits.length ? `"${hits[0].text}" has no row on the master tab; ` : 'no item named; ';
+    for (const h of named) {
+      const f = FAMILY.find(([re]) => re.test(h.c.id)); if (!f) continue;
+      const cand = master.leaves.filter((r) => f[1].test(rowText(r))).map((r) => {
+        const lt = (r.label || '').toLowerCase(), t = lt + ' ' + String(r.group || '').toLowerCase();
+        let s = 0.1 * (sim(line.acctName, r.label || r.fedBy || '') + sim(line.acctName, r.group || '')) + 0.15 * ((acctHist[r.row] || 0) / histTot);
+        for (const p of PLACES) { const inL = p.r.test(lt), rh = inL || p.r.test(t), dh = p.d.test(desc); if (rh && dh) s += 1; else if (rh && !dh) s -= inL ? p.pen : p.pen / 2; }
+        return { r, s };
+      }).sort((a, b) => b.s - a.s);
+      if (cand.length) return { row: cand[0].r.row, conf: 0.6, alts: cand.slice(1, 4).map((x) => ({ row: x.r.row })), why: label + `filed with ${(cand[0].r.label || cand[0].r.display || '').trim()}` };
+    }
+    const byHist = Object.entries(acctHist).sort((a, b) => b[1] - a[1])[0];
+    const byName = master.leaves.map((r) => ({ r, s: sim(line.acctName, (r.label || r.fedBy || '')) })).sort((a, b) => b.s - a.s)[0];
+    const words = desc.replace(/\b(replace\w*|repair\w*|install\w*|new|reclass|recl|expense|accrual|ye|to|record|paid|by|for|and|the)\b/g, ' ').match(/[a-z]{3,}/g) || [];
+    if (byName && byName.s >= 0.95 && !hits.length && words.length < 2) return { row: byName.r.row, conf: 0.8, alts: [], why: `no item named; the GL account (${line.acctName}) has its own row` };
+    if (byName && byName.s >= 0.6) return { row: byName.r.row, conf: 0.6, alts: [], why: label + `used the GL account's row (${line.acctName})` };
+    if (byHist) return { row: +byHist[0], conf: 0.55, alts: [], why: label + `used where ${line.acctName} went before` };
+    if (byName && byName.s > 0) return { row: byName.r.row, conf: 0.4, alts: [], why: label + 'closest row to the GL account name' };
+    return { row: null, conf: 0.2, alts: [], why: label + 'pick a row' };
+  };
+
   /* ---------- end-to-end ---------- */
   E.run = function (wb, opts = {}) {
     const masterName = opts.master || E.findMasterSheet(wb);
     const master = E.parseMaster(wb, masterName);
     const gls = E.glSheets(wb);
     const target = opts.target ? gls.find((g) => g.name === opts.target) : gls.slice().sort((a, b) => b.year - a.year || a.name.length - b.name.length)[0];
+    const vendors = [];
+    for (const g of gls) for (const l of E.parseGL(wb, g.name)) { const m = /^\s*AP (?:Invoice|Adjust)\s*-\s*([^:]+):/i.exec(l.desc); if (m) vendors.push(m[1]); }
+    E.setVendors(vendors);
     const { history, reports } = E.buildHistory(wb, master, { exclude: target ? [target.year] : [] });
-    const examples = history.concat(opts.userExamples || []);
-    const M = E.train(examples);
-    let lines = [];
-    if (target) {
-      lines = E.parseGL(wb, target.name);
-      for (const l of lines) {
-        if (l.offset) { l.pred = { row: null, conf: 1, why: 'offsets another line in this account' }; continue; }
-        l.pred = E.predict(M, l, master);
-        if (l.amt < 0) { l.pred.conf = Math.min(l.pred.conf, 0.5); l.pred.why = 'credit with no matching debit: confirm it should reduce this row'; }
-      }
-    }
     // name blank master rows by the GL account that historically fed them
     const feed = {};
     for (const e of history) { const f = (feed[e.row] = feed[e.row] || {}); f[e.acctName] = (f[e.acctName] || 0) + Math.abs(e.amt); }
@@ -710,7 +1006,21 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       r.fedBy = f ? Object.entries(f).sort((a, b) => b[1] - a[1])[0][0] : '';
       r.display = r.label || (r.fedBy ? `[${r.fedBy}]` : '(blank row)');
     }
-    return { master, target, lines, reports, model: M, historyCount: history.length };
+    const R = { master, target, lines: target ? E.parseGL(wb, target.name) : [], reports, history, historyCount: history.length };
+    return E.refresh(R, opts.userExamples || []);
+  };
+  // re-sort after you confirm or change lines, without re-reading the workbook
+  E.refresh = function (R, userExamples) {
+    const ex = R.history.concat(userExamples || []);
+    const M = E.train(ex);
+    M.conceptPrefs = E.conceptPrefs(ex);
+    for (const l of R.lines) {
+      if (l.offset) { l.pred = { row: null, conf: 1, why: 'offsets another line in this account' }; continue; }
+      l.pred = E.classify(M, l, R.master);
+      if (l.amt < 0 && l.pred.conf < 0.99) { l.pred.conf = Math.min(l.pred.conf, 0.5); l.pred.why = 'credit with no matching charge; ' + l.pred.why; }
+    }
+    R.model = M;
+    return R;
   };
   E._tokens = tokens; E._sim = sim; E._normDesc = normDesc;
 
@@ -932,19 +1242,7 @@ function run() {
   const target = $('#selTarget').value, master = $('#selMaster').value;
   PROP = propertyName(WB, target);
   const tYear = +(/^\s*(20\d\d)/.exec(target) || [0, 0])[1];
-  // remap remembered rows if the master tab has been re-laid out since they were saved
-  const mParsed = CapexEngine.parseMaster(WB, master);
-  const byRow = Object.fromEntries(mParsed.leaves.map((r) => [r.row, r]));
-  const userEx = [];
-  for (const e of propMem().examples) {
-    let row = e.row;
-    const lf = byRow[row];
-    if (!lf || (e.rowLabel && lf.label !== e.rowLabel)) {
-      const hit = mParsed.leaves.find((r) => r.label && r.label === e.rowLabel && r.group === e.rowGroup) || mParsed.leaves.find((r) => r.label && r.label === e.rowLabel);
-      if (!hit) continue; row = hit.row;
-    }
-    userEx.push({ ...e, row, src: 'user' });
-  }
+  const userEx = userExamples(CapexEngine.parseMaster(WB, master));
   RESULT = CapexEngine.run(WB, { master, target, userExamples: userEx });
   $('#propLine').textContent = `${PROP} · ${target} → ${master}`;
   // state per line
@@ -959,6 +1257,27 @@ function run() {
   $('#learnChips').innerHTML = RESULT.reports.map((r) => `<span class="chip ${r.coverage > 0.9 ? 'good' : r.coverage > 0.6 ? 'mid' : ''}" title="${esc(r.sheet)}: ${r.labeled} of ${r.total} lines traced">${r.year}: ${Math.round(r.coverage * 100)}%</span>`).join('') +
     (userEx.length ? `<span class="chip good">${userEx.length} of your confirmations</span>` : '');
   render();
+}
+// your saved confirmations, remapped if the master tab has been re-laid out since they were saved
+function userExamples(m) {
+  const byRow = Object.fromEntries(m.leaves.map((r) => [r.row, r]));
+  const out = [];
+  for (const e of propMem().examples) {
+    if (e.row == null) continue;
+    let row = e.row;
+    const lf = byRow[row];
+    if (!lf || (e.rowLabel && lf.label !== e.rowLabel)) {
+      const hit = m.leaves.find((r) => r.label && r.label === e.rowLabel && r.group === e.rowGroup) || m.leaves.find((r) => r.label && r.label === e.rowLabel);
+      if (!hit) continue; row = hit.row;
+    }
+    out.push({ ...e, row, src: 'user' });
+  }
+  return out;
+}
+// after you correct a line, re-sort the rest so similar lines follow your choice
+function resort() {
+  CapexEngine.refresh(RESULT, userExamples(RESULT.master));
+  for (const s of STATE) if (!s.user) { s.row = s.l.pred.row; s.conf = s.l.pred.conf; }
 }
 function lineKey(l) { return [l.acct, l.date, l.doc, l.desc, l.amt].join('|'); }
 
@@ -1034,7 +1353,7 @@ function renderTotals() {
 /* ---------- interactions ---------- */
 $('#lineTbl').addEventListener('change', async (e) => {
   const t = e.target;
-  if (t.matches('select[data-i]')) { const s = STATE[+t.dataset.i]; s.row = t.value ? +t.value : null; await remember(s, true); }
+  if (t.matches('select[data-i]')) { const s = STATE[+t.dataset.i]; s.row = t.value ? +t.value : null; await remember(s, true); resort(); }
   else if (t.matches('input[data-c]')) { const s = STATE[+t.dataset.c]; await remember(s, t.checked); }
   render();
 });
