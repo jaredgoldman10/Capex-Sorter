@@ -175,6 +175,7 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
           <button data-f="review" class="on">Needs review</button><button data-f="left">Unconfirmed</button><button data-f="all">All</button><button data-f="offset">Offsets</button>
         </div>
         <input type="search" id="q" placeholder="Search description, vendor, account, unit">
+        <span class="chip hidden" id="rowChip"></span>
         <span class="grow"></span>
         <button class="btn" id="confirmHigh">Confirm all above threshold</button>
       </div>
@@ -1719,7 +1720,8 @@ $('#restoreFile').onchange = async (e) => {
 };
 
 /* ---------- workbook ---------- */
-let WB_BYTES = null;
+let WB_BYTES = null, ROWF = null;
+function rowName(row) { const r = RESULT && RESULT.master.leaves.find((x) => x.row === row); return r ? (r.display || '').trim() : ''; }
 let WB = null, FILE = '', RESULT = null, STATE = null, FILTER = 'review', PROP = '';
 const drop = $('#dropZone');
 drop.onclick = () => $('#fileIn').click();
@@ -1861,13 +1863,14 @@ function renderLines(th) {
   else if (FILTER === 'offset') rows = rows.filter((s) => s.l.offset);
   else if (FILTER === 'left') rows = rows.filter((s) => !s.l.offset && !s.user);
   else rows = rows.filter((s) => !s.l.offset);
+  if (ROWF != null) rows = rows.filter((s) => s.row === ROWF || (s.split || []).some((p) => p.row === ROWF));
   if (q) rows = rows.filter((s) => (s.l.desc + ' ' + s.l.acct + ' ' + s.l.acctName + ' ' + s.l.unit + ' ' + s.l.doc).toLowerCase().includes(q));
   const tb = $('#lineTbl tbody');
   if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="muted" style="padding:22px;text-align:center">${FILTER === 'review' ? 'Nothing below the threshold. Check “All” to spot-check the rest.' : 'No lines.'}</td></tr>`; return; }
   tb.innerHTML = rows.map((s) => {
     const l = s.l;
     const cls = l.offset ? 'offset' : s.user ? 'user' : s.conf < th ? 'flag' : '';
-    const sel = l.offset ? `<span class="muted">Offset pair (nets to zero)</span>` : `<select data-i="${s.i}">${leafOptions(s.row)}</select><span class="why">${esc(s.user ? 'confirmed by you' : l.pred.why)}</span>`;
+    const sel = l.offset ? `<span class="muted">Offset pair (nets to zero)</span>` : `<select data-i="${s.i}">${leafOptions(s.row)}</select>${s.split ? `<span class="why" style="color:var(--ink)"><b>Split:</b> ${s.split.map((p) => `row ${p.row} ${esc(rowName(p.row))} ${fmt(p.amt)}`).join(' · ')}</span>` : ''}<span class="why">${esc(s.user ? 'confirmed by you' : l.pred.why)}</span>`;
     return `<tr class="${cls}"><td class="num">${esc(l.date)}</td><td class="acct">${esc(l.acct)}<br>${esc(l.acctName)}</td><td class="desc">${esc(l.desc)}</td><td>${esc(l.unit)}</td><td class="num">${fmt(l.amt)}</td><td>${sel}</td><td>${l.offset ? '' : confPill(s, th)}</td><td>${l.offset ? '' : `<input type="checkbox" data-c="${s.i}" ${s.user ? 'checked' : ''} aria-label="Confirm">`}</td></tr>`;
   }).join('');
 }
@@ -1889,7 +1892,7 @@ function renderTotals() {
     gt += v; gm += cur; any = true;
     const own = (RESULT.rowOwner || {})[r.row], ownName = own ? `${own} ${(RESULT.accountNames || {})[own] || ''}`.trim() : '';
     rowsOut.push([r.row, r.display, r.group, v, counts[r.row] || 0, cur, ownName]);
-    html += `<tr><td class="num">${r.row}</td><td>${esc(r.display)}</td><td class="acct">${esc(v ? ownName : '')}</td><td class="num">${counts[r.row] || ''}</td><td class="num">${v ? fmt(v) : ''}</td><td class="num">${cur ? fmt(cur) : ''}</td><td class="num ${cur && Math.abs(d) > 0.005 ? 'diff' : ''}">${cur && Math.abs(d) > 0.005 ? fmt(d) : ''}</td></tr>`;
+    html += `<tr data-row="${r.row}" style="cursor:pointer" title="Show the lines on this row"><td class="num">${r.row}</td><td>${esc(r.display)}</td><td class="acct">${esc(v ? ownName : '')}</td><td class="num">${counts[r.row] || ''}</td><td class="num">${v ? fmt(v) : ''}</td><td class="num">${cur ? fmt(cur) : ''}</td><td class="num ${cur && Math.abs(d) > 0.005 ? 'diff' : ''}">${cur && Math.abs(d) > 0.005 ? fmt(d) : ''}</td></tr>`;
   }
   html += `<tr><td></td><td><b>Total</b></td><td></td><td></td><td class="num"><b>${fmt(gt)}</b></td><td class="num"><b>${fmt(gm)}</b></td><td></td></tr>`;
   $('#totTbl tbody').innerHTML = any ? html : '<tr><td colspan="7" class="muted" style="padding:22px;text-align:center">No amounts yet.</td></tr>';
@@ -2008,6 +2011,17 @@ function renderFinal() {
   renderFinal.others = others.map((o) => o.r.row);
 }
 $('#finalCol').onchange = renderFinal;
+// click a total to see exactly which lines (and split pieces) make it up
+$('#totTbl').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-row]'); if (!tr) return;
+  ROWF = +tr.dataset.row; FILTER = 'all'; $('#q').value = '';
+  $$('#filterSeg button').forEach((x) => x.classList.toggle('on', x.dataset.f === 'all'));
+  $$('.tab').forEach((x) => x.classList.toggle('on', x.dataset.tab === 'lines'));
+  ['lines', 'totals', 'words'].forEach((k) => $('#tab-' + k).classList.toggle('hidden', k !== 'lines'));
+  $('#rowChip').innerHTML = `Row ${ROWF} ${esc(rowName(ROWF))} <button class="link" id="rowClear">× show all</button>`; $('#rowChip').classList.remove('hidden');
+  $('#rowClear').onclick = () => { ROWF = null; $('#rowChip').classList.add('hidden'); render(); };
+  render(); $('#lineTbl').scrollIntoView({ behavior: 'smooth' });
+});
 $('#showLeft').onclick = () => {
   FILTER = 'left'; $$('#filterSeg button').forEach((x) => x.classList.toggle('on', x.dataset.f === 'left'));
   $$('.tab').forEach((x) => x.classList.toggle('on', x.dataset.tab === 'lines'));
