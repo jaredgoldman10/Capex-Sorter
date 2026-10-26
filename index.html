@@ -94,6 +94,7 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
 .foot{margin-top:26px;font-size:12px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between}
 .diff{color:var(--warn)}
 .hidden{display:none!important}
+#finalBar{position:sticky;bottom:0;z-index:5;margin:18px 0 0;padding:12px 16px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 -6px 18px rgba(0,0,0,.08)}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.show{opacity:1}
 .grp td{background:var(--soft);font-weight:600;font-size:12px;color:var(--muted)}
@@ -171,7 +172,7 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
     <div id="tab-lines">
       <div class="toolbar">
         <div class="seg" id="filterSeg">
-          <button data-f="review" class="on">Needs review</button><button data-f="all">All</button><button data-f="offset">Offsets</button>
+          <button data-f="review" class="on">Needs review</button><button data-f="left">Unconfirmed</button><button data-f="all">All</button><button data-f="offset">Offsets</button>
         </div>
         <input type="search" id="q" placeholder="Search description, vendor, account, unit">
         <span class="grow"></span>
@@ -180,15 +181,6 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
       <div class="tbl-wrap"><table id="lineTbl"><thead><tr>
         <th>Posted</th><th>GL account</th><th>Description</th><th>Unit</th><th class="num">Amount</th><th>Master row</th><th>Confidence</th><th title="Confirmed lines are saved to memory">OK</th>
       </tr></thead><tbody></tbody></table></div>
-      <div class="panel" id="finalBar" style="margin-top:14px">
-        <div class="row">
-          <div class="grow"><b>Finalize</b> <span class="muted" id="finalNote"></span></div>
-          <label class="muted" style="font-size:13px">Write into column <select id="finalCol" style="padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel)"></select></label>
-          <label class="muted" style="font-size:13px"><input type="checkbox" id="finalClear"> Blank other figures in that column</label>
-          <button class="btn primary" id="finalBtn" disabled>Finalize and download Page 1</button>
-        </div>
-        <div class="muted" style="font-size:12px;margin-top:8px" id="finalHelp"></div>
-      </div>
     </div>
 
     <div id="tab-totals" class="hidden">
@@ -216,6 +208,16 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
     </div>
   </section>
 
+      <div id="finalBar" class="hidden">
+        <div class="row">
+          <div class="grow"><b>Finalize</b> <span class="muted" id="finalNote"></span></div>
+          <label class="muted" style="font-size:13px">Write into column <select id="finalCol" style="padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel)"></select></label>
+          <label class="muted" style="font-size:13px"><input type="checkbox" id="finalClear"> Blank other figures in that column</label>
+          <button class="btn" id="showLeft">Show unconfirmed</button>
+          <button class="btn primary" id="finalBtn" disabled>Finalize and download Page 1</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:8px" id="finalHelp"></div>
+      </div>
   <div class="foot">
     <span>Workbooks are read in this browser only and never uploaded. The only outside connection is the sign-in check.</span>
     <span id="memLine"></span>
@@ -1736,7 +1738,7 @@ $('#forgetBtn').onclick = async () => {
   MEM.props[PROP] = { examples: [], rules: propMem().rules || [] }; await saveVault(); run(); toast('Choices cleared.');
 };
 $('#changeFile').onclick = () => { resetWork(); $('#fileIn').click(); };
-function resetWork() { WB = null; RESULT = null; STATE = null; $('#work').classList.add('hidden'); drop.classList.remove('hidden'); $('#lineTbl tbody').innerHTML = ''; $('#totTbl tbody').innerHTML = ''; }
+function resetWork() { WB = null; RESULT = null; STATE = null; $('#work').classList.add('hidden'); drop.classList.remove('hidden'); $('#lineTbl tbody').innerHTML = ''; $('#totTbl tbody').innerHTML = ''; $('#finalBar').classList.add('hidden'); }
 
 async function loadFile(f) {
   try {
@@ -1857,6 +1859,7 @@ function renderLines(th) {
   let rows = STATE;
   if (FILTER === 'review') rows = rows.filter((s) => !s.l.offset && !s.user && s.conf < th);
   else if (FILTER === 'offset') rows = rows.filter((s) => s.l.offset);
+  else if (FILTER === 'left') rows = rows.filter((s) => !s.l.offset && !s.user);
   else rows = rows.filter((s) => !s.l.offset);
   if (q) rows = rows.filter((s) => (s.l.desc + ' ' + s.l.acct + ' ' + s.l.acctName + ' ' + s.l.unit + ' ' + s.l.doc).toLowerCase().includes(q));
   const tb = $('#lineTbl tbody');
@@ -1988,6 +1991,7 @@ function finalColumns() {
   return opts;
 }
 function renderFinal() {
+  $('#finalBar').classList.toggle('hidden', !RESULT);
   if (!RESULT) return;
   const live = STATE.filter((s) => !s.l.offset), left = live.filter((s) => !s.user).length;
   const opts = finalColumns(), sel = $('#finalCol'), cur = sel.value;
@@ -1995,6 +1999,7 @@ function renderFinal() {
   if (cur && opts.some((o) => String(o.c) === cur)) sel.value = cur;
   const sums = finalSums(), rows = Object.keys(sums).length, tot = Object.values(sums).reduce((a, b) => a + b, 0);
   $('#finalBtn').disabled = left > 0 || !opts.length;
+  $('#showLeft').classList.toggle('hidden', !left);
   $('#finalNote').textContent = left ? `· ${left} of ${live.length} lines still to confirm` : `· all ${live.length} lines confirmed · ${rows} rows · $${fmt(tot)}`;
   const c = +sel.value, ws = WB.Sheets[RESULT.master.sheet];
   const others = RESULT.master.leaves.filter((r) => !(r.row in sums)).map((r) => ({ r, x: ws[XLSX.utils.encode_cell({ r: r.row - 1, c })] })).filter((o) => o.x && typeof o.x.v === 'number' && o.x.v);
@@ -2003,6 +2008,12 @@ function renderFinal() {
   renderFinal.others = others.map((o) => o.r.row);
 }
 $('#finalCol').onchange = renderFinal;
+$('#showLeft').onclick = () => {
+  FILTER = 'left'; $$('#filterSeg button').forEach((x) => x.classList.toggle('on', x.dataset.f === 'left'));
+  $$('.tab').forEach((x) => x.classList.toggle('on', x.dataset.tab === 'lines'));
+  ['lines', 'totals', 'words'].forEach((k) => $('#tab-' + k).classList.toggle('hidden', k !== 'lines'));
+  $('#q').value = ''; render(); $('#lineTbl').scrollIntoView({ behavior: 'smooth' });
+};
 $('#finalBtn').onclick = async () => {
   const b = $('#finalBtn'); b.disabled = true; b.textContent = 'Building…';
   try {
