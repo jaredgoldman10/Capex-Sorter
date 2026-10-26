@@ -692,6 +692,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
   // Order matters: specific phrases come first and are masked out so that, e.g., "range hood"
   // is not also read as "range", or "dryer vent" as "dryer".
   const LEX = [
+    C('dumpster mover', /power ?pusher( dumpster( mover)?)?|dumpster (mover|tug)s?/, /maint\w* equip/),
     // pool items (before backflow/pump/heater so pool equipment stays pool equipment)
     C('pool equipment', /pool[^,;]{0,25}(pumps?|filters?|heaters?|equipment|chlorinat\w*|backflow\w*( preventers?)?|motors?)|(pumps?|filters?|heaters?|chlorinat\w*|backflow preventers?)[^,;]{0,25}pool/, /pool\s*equip/),
     C('pool restroom', /pool[^,;]{0,20}(restrooms?|bathrooms?)|(restrooms?|bathrooms?)[^,;]{0,20}pool/, /pool\s*rest/),
@@ -713,7 +714,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     C('microwave', /((counter ?top|over[- ]the[- ]range|otr) )?\bmi\w{0,3}waves?\b/, /microwave/),
     C('range', /\b((coil|glass ?top|electric|gas) )?(ranges?|stoves?|ovens?|cook ?tops?)\b/, /\brange\b(?!\s*hood)|stove|oven/),
     C('refrigerator', /refrigerators?|\bfridges?\b|\bfrig\b|refrig\w*/, /refrigerator|fridge/),
-    C('disposal', /(garbage )?disposals?|disposers?/, /disposal/),
+    C('disposal', /(garbage )?disposals?|disposers?|garbage disp\b|\bdisp\b/, /disposal/),
     C('washer/dryer', /\bwashers?\b|\bdryers?\b|washer ?\/ ?dryer|\bw\/d\b/, /washer|dryer(?!\s*vent)/),
     C('appliance', /appliances?/, /appliance/, 2),
     // HVAC & water heating
@@ -721,7 +722,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     C('boiler pump/piping', /(boiler )?(circulat\w*|circ) ?pumps?|boiler pumps?|boiler (piping|pipes?|valves?)|mixing valves?|expansion tanks?/, /piping|pumps?/),
     C('backflow', /back ?flow\w*( preventers?)?/, /back ?flow|black flow/),
     C('boiler', /boilers?/, /boiler/),
-    C('furnace', /furnaces?|inducers?( motors?)?|induction motors?|ignit[oe]rs?|flame sensors?|control boards?|digital controllers?|gas valves?|pressure switch\w*|limit switch\w*|heat exchang\w*|blower motors?/, /furnace/),
+    C('furnace', /furnaces?|inducers?( motors?)?|induction motors?|ignit[oe]rs?|flame sensors?|control boards?|digital controllers?|gas valves?|pressure switch\w*|limit switch\w*|heat exchang\w*|blower motors?|motors? for heating|heating motors?/, /furnace/),
     C('air conditioning', /\ba\/?c\b( units?)?|air condition\w*|condens(er|ing units?)|compressors?|refrigerant|freon|thru-?wall|heat pumps?|mini ?splits?|\bptac\b/, /\ba\/c\b|\bac\b|air condition|\bhac\b/),
     C('radiation', /radiators?|radiation|baseboard heat\w*|zone (motors?|valves?)|radiator valves?/, /radiation|radiator/),
     C('exhaust fan', /exhaust fans?( motors?)?|bath(room)? fans?|vent fans?|ventilation/, /ventilation|exhaust/),
@@ -756,7 +757,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     C('meter bank', /meter (banks?|bases?|sockets?)/, /meter/),
     C('exterior lighting', /pole lights?|site light\w*|parking lot light\w*|wall ?packs?|exterior light\w*|flood ?lights?/, /site lighting|pole|bldg mounted|exterior light/),
     C('lighting', /light (fixtures?|bulbs?)|\bbulbs?\b|\bfixtures?\b|chandeliers?|ceiling fans?|\bled\b|\blamps?\b|\bt8\b|halogen|lighting/, /light|ceiling fan/),
-    C('electrical', /outlets?|receptacles?|breakers?|switch(es)?\b|switch covers?|wiring|rewir\w*|electrical|electrician|gfci|wall plates?|conduit/, /electrical(?!\s*panel)/),
+    C('electrical', /outlets?|receptacles?|breakers?|switch(es)?\b|switch covers?|wiring|rewir\w*|electrical|\belectric\b|electrician|gfci|wall plates?|conduit/, /electrical(?!\s*panel)/),
     C('generator', /generators?/, /generator/),
     // elevator
     C('elevator cab', /\bcabs?\b|cab interior/, /\bcabs?\b/),
@@ -792,7 +793,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     // equipment, vehicles, office
     C('vehicle', /\btrucks?\b|vehicles?|transmission|chevrolet|\bford\b|\bvan\b|trailers?/, /truck|trailer|vehicle/),
     C('golf cart', /golf carts?|utility carts?|\bgator\b/, /golf cart/),
-    C('maintenance equipment', /kubota|tractors?|loaders?|mowers?|snow ?blowers?|\bplows?\b|power pusher( dumpster( mover)?)?|skid steer|equipment rental|\btools?\b|radios?|vermeer|pressure washers?|leaf blowers?|ladders?/, /maint\w* equip/),
+    C('maintenance equipment', /kubota|tractors?|loaders?|mowers?|snow ?blowers?|\bplows?\b|power pusher( dumpster( mover)?)?|skid steer|equipment rental|\btools?\b|radios?|vermeer|pressure washers?|leaf blowers?|ladders?|space heaters?/, /maint\w* equip/),
     C('computer', /computers?|laptops?|desktops?|monitors?|printers?|servers?|tablets?|ipads?|software/, /computer/),
     C('office furniture & equipment', /\bdesks?\b|office chairs?|office furniture|filing cabinets?|coffee (machine|maker)s?|nespresso|keurig|copiers?|shredders?/, /office furn|office equip/),
     C('furniture', /furniture|lounge|sofas?|couch(es)?|\btables?\b|\bchairs?\b/, /furniture|tables and chairs/),
@@ -839,9 +840,18 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
   const GENERIC_R = /as needed|\bmisc|general|allowance/;
 
   // vendor names say who, not what ("Modern Landscape" did tree work; that isn't landscaping)
-  let VENDOR_RE = null;
+  let VENDOR_RE = null, VENDOR_PARTS = [];
+  const vnorm = (n) => String(n).toLowerCase().replace(/\b(llc|inc|co|corp|company|ltd|maintltd|the|credit services|services?)\b|[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 2).join(' ');
+  // who the line is from, whether or not it's written as "AP Invoice - VENDOR:"
+  E.vendorKey = function (desc) {
+    const m = /^\s*AP (?:Invoice|Adjust)\s*-\s*([^:]+):/i.exec(desc || '');
+    if (m) return vnorm(m[1]);
+    const d = String(desc || '').toLowerCase();
+    return VENDOR_PARTS.find((p) => new RegExp('\\b' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(d)) || '';
+  };
   E.setVendors = function (names) {
     const parts = [...new Set(names.map((n) => String(n).toLowerCase().replace(/\b(llc|inc|co|corp|company|ltd|maintltd|the|credit services|services?)\b|[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 2).join(' ')).filter((v) => v.split(' ').length === 2 && v.length > 5))];
+    VENDOR_PARTS = parts;
     VENDOR_RE = parts.length ? new RegExp('\\b(' + parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b[^,;:]{0,40}?(llc|inc|co\\b|company)?', 'g') : null;
   };
   function cleanDesc(desc) {
@@ -852,6 +862,22 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     return ' ' + d
       .replace(/reversed\s*--/, ' ').replace(/\bpc--[^-]*--/, ' ') + ' ';
   }
+  const ACTION = new Set(['painting / drywall', 'power wash', 'dryer vent', 'trim / siding']);
+  const clauseBounds = (orig, pos) => {
+    const st = Math.max(orig.lastIndexOf(',', pos), orig.lastIndexOf(';', pos), orig.lastIndexOf(' - ', pos), orig.lastIndexOf('/', pos));
+    let en = orig.length;
+    for (const ch of [',', ';', ' - ']) { const i = orig.indexOf(ch, pos); if (i >= 0 && i < en) en = i; }
+    return [st + 1, en];
+  };
+  // quantity written next to an item: "Fridge (2)", "(2) Microwaves", "2 ranges", "26 sprinkler head"
+  function qtyAt(orig, pos, len) {
+    const after = orig.slice(pos + len, pos + len + 14), before = orig.slice(Math.max(0, pos - 8), pos);
+    let m = /^\s*(?:x\s*)?\((\d{1,3})\)/.exec(after) || /^\s*x\s*(\d{1,3})\b/.exec(after);
+    if (m) return +m[1];
+    m = /(?:^|[\s(])\(?(\d{1,3})\)?\s+$/.exec(before);
+    if (m && !/["'x]\s*$/.test(before.slice(0, -1))) return +m[1];
+    return 1;
+  }
   function findConcepts(desc) {
     const orig = cleanDesc(desc);
     let s = orig;
@@ -861,18 +887,26 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
       let m, hit = null;
       while ((m = re.exec(s))) {
         if (!m[0].trim()) { re.lastIndex++; continue; }
-        if (!hit) hit = { c, pos: m.index, text: m[0].trim() };
+        const q = qtyAt(orig, m.index, m[0].length);
+        if (!hit) hit = { c, pos: m.index, end: m.index + m[0].length, text: m[0].trim(), qty: 0 };
+        hit.qty += q;
         s = s.slice(0, m.index) + ' '.repeat(m[0].length) + s.slice(m.index + m[0].length);
       }
       if (hit) {
         // "paint walls around new tub surround": the tub is where, not what
-        const clauseStart = Math.max(orig.lastIndexOf(',', hit.pos), orig.lastIndexOf(';', hit.pos), orig.lastIndexOf('(', hit.pos), orig.lastIndexOf(' - ', hit.pos));
-        const before = orig.slice(clauseStart + 1, hit.pos);
+        const [cs] = clauseBounds(orig, hit.pos);
+        const before = orig.slice(cs, hit.pos);
         hit.qual = QUAL.test(before) && /[a-z]{3,}/.test(before.replace(QUAL, ''));
         found.push(hit);
       }
     }
-    return found.sort((a, b) => a.pos - b.pos);
+    found.sort((a, b) => a.pos - b.pos);
+    // "paint basement and interior doors": what follows an action word in the same clause is what got painted
+    for (const h of found) if (ACTION.has(h.c.id)) {
+      const [, ce] = clauseBounds(orig, h.pos);
+      for (const o of found) if (o !== h && o.pos > h.pos && o.pos < ce) o.qual = true;
+    }
+    return found;
   }
   E._findConcepts = findConcepts;
 
@@ -894,97 +928,173 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     return P;
   };
 
+  // typical unit costs from single-item lines across every GL year in the workbook
+  let PRICES = {};
+  E.setPrices = function (lines) {
+    const by = {};
+    for (const l of lines) {
+      if (!(l.amt > 0) || l.offset) continue;
+      const hs = findConcepts(l.desc).filter((h) => !h.qual && h.c.w >= 3 && !h.c.place);
+      if (hs.length !== 1) continue;
+      (by[hs[0].c.id] = by[hs[0].c.id] || []).push(l.amt / Math.max(1, hs[0].qty));
+    }
+    PRICES = {};
+    for (const [k, v] of Object.entries(by)) { v.sort((a, b) => a - b); PRICES[k] = v[Math.floor(v.length / 2)]; }
+    return PRICES;
+  };
+  const HARDSCAPE = new Set(['concrete', 'patio', 'sidewalk', 'deck / balcony', 'fence', 'railing', 'stairs', 'masonry', 'paving', 'pool deck', 'painting / drywall', 'power wash']);
+  const money = (v) => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
   E.classify = function (M, line, master) {
     const ex = M.exact[line.acct + '|' + normDesc(line.desc)];
     if (ex != null) return { row: ex, conf: 0.99, alts: [], why: 'you set this before' };
     const desc = cleanDesc(line.desc);
+    const leafBy = M._leafBy || (M._leafBy = Object.fromEntries(master.leaves.map((r) => [r.row, r])));
+    const name = (row) => { const r = leafBy[row]; return r ? (r.label || r.display || '').trim() : ''; };
     const hits = findConcepts(line.desc);
     const named = hits.filter((h) => !h.c.place);
-    const strong = named.filter((h) => h.c.w >= 3);
-    const use = strong.length ? strong : named.length ? named : hits;
+    const strong = named.filter((h) => h.c.w >= 3 && !h.qual);
+    const use = strong.length ? strong : named.filter((h) => h.c.w >= 3).length ? named.filter((h) => h.c.w >= 3) : named.length ? named : hits;
     const acctHist = M.acct[line.acct] || {};
     const histTot = Object.values(acctHist).reduce((a, b) => a + b, 0) || 1;
     const inUnit = !!(line.unit && line.unit.trim()) || UNIT_D.test(desc);
     const P = M.conceptPrefs || {};
+    const share = (q, row) => (q && q.tot ? (q.rows[row] || 0) / q.tot : 0);
+
+    // 1) a reversal of last year's accrual goes wherever that accrual went
+    if (line.amt < 0 && /revers|accru/.test(desc) && M.history) {
+      const orig = M.history.filter((e) => e.acct === line.acct && Math.abs(e.amt + line.amt) < 0.015);
+      const pick = orig.find((e) => /accru/i.test(e.desc)) || orig[0];
+      if (pick) return { row: pick.row, conf: 0.9, alts: [], why: `reverses the ${pick.year} accrual of ${money(-line.amt)} filed under ${name(pick.row)}` };
+    }
+
+    // 2) score every master row against what the line names
     const scored = [];
     for (const r of master.leaves) {
       const t = rowText(r); if (!t.trim()) continue;
-      let s = 0; const why = [];
+      let s = 0, place = false; const why = [];
       for (const h of use) if (h.c.r.test(t)) { s += h.qual ? 1 : h.c.w; why.push(h); }
       if (!s) continue;
-      const lt = (r.label || '').toLowerCase(), tg = lt + ' ' + String(r.group || '').toLowerCase(); // the row's section also says where it applies
+      const lt = (r.label || '').toLowerCase(), tg = lt + ' ' + String(r.group || '').toLowerCase();
       for (const p of PLACES) {
         const inLabel = p.r.test(lt), rh = inLabel || p.r.test(tg), dh = p.d.test(desc);
-        if (rh && dh) s += 1; else if (rh && !dh) s -= inLabel ? p.pen : p.pen / 2;
+        if (rh && dh) { s += 1; if (inLabel && p.pen > 0) place = true; } else if (rh && !dh) s -= inLabel ? p.pen : p.pen / 2;
       }
       if (UNIT_R.test(t) && inUnit) s += 0.75;
       const lbl = r.label || '';
       const n4 = lbl.match(/\b\d{4}\b/g); if (n4) s += n4.some((n) => desc.includes(n)) ? 1 : -0.75;
       const n2 = lbl.replace(/\b\d{4}\b/g, '').match(/\b\d{2,3}\b/g); if (n2 && !n2.some((n) => desc.includes(n))) s -= 0.4;
       if (GENERIC_R.test(t)) s += 0.2;
-      // the more of the label the description accounts for, the better the fit
-      const nt = nameTokens(lbl).size;
-      s += lbl ? 0.6 / Math.max(1, nt - 1) : 0.35;
-      // tie-breakers: how this kind of item was filed before, same GL account family, past use by this account
-      let pref = 0;
-      for (const h of why) {
-        const p = P[h.c.id]; if (!p) continue;
-        const share = (q) => (q.tot ? (q.rows[r.row] || 0) / q.tot : 0);
-        pref = Math.max(pref, 0.2 * share(p.hist) + 1.5 * share(p.user));
-      }
-      s += pref;
-      s += 0.1 * (sim(line.acctName, lbl || r.fedBy || '') + sim(line.acctName, r.group || ''));
-      s += 0.15 * ((acctHist[r.row] || 0) / histTot);
-      scored.push({ row: r.row, s, why, pref, label: (r.label || r.display || '').trim(), norm: normLabel(r) });
+      s += lbl ? 0.6 / Math.max(1, nameTokens(lbl).size - 1) : 0.35;
+      let pref = 0, hist = 0;
+      for (const h of why) { const p = P[h.c.id]; if (p) { pref = Math.max(pref, 1.5 * share(p.user, r.row)); hist = Math.max(hist, share(p.hist, r.row)); } }
+      s += pref + 0.1 * (sim(line.acctName, lbl || r.fedBy || '') + sim(line.acctName, r.group || ''));
+      scored.push({ row: r.row, s, why, pref, hist, place, acct: (acctHist[r.row] || 0) / histTot, label: name(r.row), norm: normLabel(r), group: r.group });
     }
     scored.sort((a, b) => b.s - a.s);
-    if (scored.length) {
-      const primary = use.filter((h) => !h.qual);
-      // a line naming several different things: file under the first one, and say so
-      const wt = (h) => (h.qual ? 1 : h.c.w);
-      const rowsFor = (h) => scored.filter((x) => x.why.includes(h)).map((x) => ({ x, own: x.s - x.why.filter((o) => o !== h).reduce((a, o) => a + wt(o), 0) })).sort((a, b) => b.own - a.own).map((y) => y.x);
-      const distinct = [];
-      for (const h of primary) {
-        const best = rowsFor(h)[0];
-        const key = best ? best.norm : 'none:' + h.c.id;
-        if (!distinct.some((d) => d.key === key) && !(h.c.w < 3 && primary.some((o) => o !== h && o.c.w >= 3))) distinct.push({ h, key, best });
-      }
-      let top = scored[0];
-      const mixed = distinct.length > 1;
-      if (mixed && distinct[0].best) top = distinct[0].best;
-      const second = scored.find((x) => x.norm !== top.norm);
-      const lead = top.why.filter((h) => !h.qual).map((h) => `"${h.text}"`).join(', ') || top.why.map((h) => `"${h.text}"`).join(', ');
-      const margin = second ? top.s - second.s : 9;
-      const genericOnly = top.why.every((h) => h.c.w < 3);
-      let conf, why;
-      if (mixed) {
-        conf = 0.55;
-        why = `names several things (${distinct.map((d) => `"${d.h.text}"`).join(', ')}); filed under the first, amount isn't split`;
-      } else if (margin >= 1) { conf = 0.95; why = `${lead} → ${top.label}`; }
-      else if (margin >= 0.4 || top.pref >= 1) { conf = 0.85; why = `${lead} → ${top.label}${top.pref >= 1 ? ' (as you filed it before)' : ''}`; }
-      else { conf = 0.65; why = `${lead} fits several rows (${[top, ...scored.filter((x) => x.norm !== top.norm).slice(0, 2)].map((x) => x.label).join(' / ')})`; }
-      if (genericOnly) conf = Math.min(conf, 0.65);
-      return { row: top.row, conf, alts: scored.filter((x) => x.row !== top.row).slice(0, 3).map((x) => ({ row: x.row })), why };
-    }
-    // the item has no row of its own: use the row for its broader kind, preferring this account's section
-    const label = hits.length ? `"${hits[0].text}" has no row on the master tab; ` : 'no item named; ';
-    for (const h of named) {
-      const f = FAMILY.find(([re]) => re.test(h.c.id)); if (!f) continue;
+
+    // the row an item points to on its own (ignoring the other items on the line)
+    const wt = (h) => (h.qual ? 1 : h.c.w);
+    // items with no row of their own fall back to the row for their broader kind
+    const familyRow = (h) => {
+      const f = FAMILY.find(([re]) => re.test(h.c.id)); if (!f) return null;
       const cand = master.leaves.filter((r) => f[1].test(rowText(r))).map((r) => {
         const lt = (r.label || '').toLowerCase(), t = lt + ' ' + String(r.group || '').toLowerCase();
-        let s = 0.1 * (sim(line.acctName, r.label || r.fedBy || '') + sim(line.acctName, r.group || '')) + 0.15 * ((acctHist[r.row] || 0) / histTot);
+        let s = 0.1 * (sim(line.acctName, r.label || r.fedBy || '') + sim(line.acctName, r.group || '')) + 0.5 * ((acctHist[r.row] || 0) / histTot);
         for (const p of PLACES) { const inL = p.r.test(lt), rh = inL || p.r.test(t), dh = p.d.test(desc); if (rh && dh) s += 1; else if (rh && !dh) s -= inL ? p.pen : p.pen / 2; }
         return { r, s };
       }).sort((a, b) => b.s - a.s);
-      if (cand.length) return { row: cand[0].r.row, conf: 0.6, alts: cand.slice(1, 4).map((x) => ({ row: x.r.row })), why: label + `filed with ${(cand[0].r.label || cand[0].r.display || '').trim()}` };
+      return cand.length ? { row: cand[0].r.row, group: cand[0].r.group, family: true } : null;
+    };
+    // among rows that fit equally, take the one past years used for this item, then for this account
+    const better = (a, b) => b.hist - a.hist || b.acct - a.acct || b.s - a.s;
+    const settle = (cands, label) => {
+      const top = cands.slice().sort((a, b) => b.s - a.s)[0];
+      let tied = cands.filter((x) => x.s >= top.s - 0.4);
+      // a place the line names (senior building, office, hallway) outranks past habit
+      if (tied.some((x) => x.place)) tied = tied.filter((x) => x.place);
+      // rows with the same label are one choice; within them take the one used before
+      const distinct = [];
+      for (const x of tied) { const g = distinct.find((d) => d.norm === x.norm); if (!g) distinct.push(x); else if (better(x, g) < 0) distinct[distinct.indexOf(g)] = x; }
+      if (distinct.length <= 1) return { row: distinct[0].row, conf: 0.95, why: `${label} → ${distinct[0].label}` };
+      const byHist = distinct.slice().sort(better);
+      const h = byHist[0];
+      if (h.hist > 0 || h.acct > 0) return { row: h.row, conf: 0.85, why: `${label} → ${h.label} (${distinct.length} rows fit; past years filed it here)` };
+      return { row: top.row, conf: 0.75, why: `${label} → ${top.label} (closest of ${distinct.map((x) => x.label).join(' / ')})` };
+    };
+
+    let out = null;
+    if (scored.length || strong.length) {
+      const items = (strong.length ? strong : use.filter((h) => !h.c.place)).length ? (strong.length ? strong : use.filter((h) => !h.c.place)) : use;
+      // one target per distinct row the items point to
+      const targets = [];
+      for (const h of items) {
+        const own = scored.filter((x) => x.why.includes(h)).map((x) => ({ ...x, s: x.s - x.why.filter((o) => o !== h).reduce((a, o) => a + wt(o), 0) }));
+        const b = own.length ? settle(own, '') : null;
+        const bx = b ? scored.find((x) => x.row === b.row) : null;
+        const t = bx ? { row: bx.row, group: bx.group, norm: bx.norm } : familyRow(h);
+        if (!t) continue;
+        const key = t.norm || 'row' + t.row;
+        let g = targets.find((x) => x.key === key);
+        if (!g) targets.push((g = { key, row: t.row, group: t.group, items: [], family: !!t.family }));
+        g.items.push(h);
+      }
+      if (targets.length > 1 && /\bpool\b/.test(desc) && items.every((h) => HARDSCAPE.has(h.c.id) || /pool/.test(h.c.id))) {
+        const deck = master.leaves.find((r) => /pool/.test((r.label || '').toLowerCase()) && /deck/.test((r.label || '').toLowerCase()));
+        if (deck) out = { row: deck.row, conf: 0.9, why: `hardscape work at the pool (${items.map((h) => `"${h.text}"`).join(', ')}) → ${name(deck.row)}` };
+      }
+      if (!out && targets.length > 1) {
+        // several items on one invoice line: split by typical unit cost when every item has one
+        const est = targets.map((t) => ({ t, v: t.items.reduce((a, h) => a + (PRICES[h.c.id] ? PRICES[h.c.id] * Math.max(1, h.qty) : NaN), 0) }));
+        const desc2 = targets.map((t) => t.items.map((h) => `${h.qty > 1 ? h.qty + '× ' : ''}${h.text}`).join(' + ')).join(', ');
+        if (est.every((e) => isFinite(e.v) && e.v > 0)) {
+          const tot = est.reduce((a, e) => a + e.v, 0);
+          let left = line.amt;
+          const split = est.map((e, i) => {
+            const amt = i === est.length - 1 ? Math.round(left * 100) / 100 : Math.round((line.amt * e.v / tot) * 100) / 100;
+            left -= amt; return { row: e.t.row, amt, item: e.t.items.map((h) => h.text).join(' + ') };
+          });
+          const main = split.slice().sort((a, b) => Math.abs(b.amt) - Math.abs(a.amt))[0];
+          out = { row: main.row, split, conf: 0.9, why: `split by typical unit cost: ${split.map((p) => `${p.item} ${money(p.amt)} → ${name(p.row)}`).join('; ')}` };
+        } else {
+          // no cost basis for every item: file under the item worth the most
+          const known = est.filter((e) => isFinite(e.v)).map((e) => e.v);
+          const fill = known.length ? known.sort((a, b) => a - b)[Math.floor(known.length / 2)] : 1;
+          const ranked = targets.map((t) => ({ t, v: t.items.reduce((a, h) => a + (PRICES[h.c.id] || fill / Math.max(1, t.items.length)) * Math.max(1, h.qty), 0) })).sort((a, b) => b.v - a.v);
+          const sumv = ranked.reduce((a, x) => a + x.v, 0);
+          const lead = ranked[0], sameGroup = targets.every((t) => t.group === lead.t.group);
+          const dominant = lead.v / sumv >= 0.7;
+          out = { row: lead.t.row, conf: dominant || sameGroup ? 0.8 : 0.6, why: `line covers ${desc2}; filed under ${name(lead.t.row)}${dominant ? ' (most of the cost)' : sameGroup ? ' (same section)' : ' (no cost basis to split)'}` };
+        }
+      }
+      if (!out && targets.length === 1) {
+        const t = targets[0];
+        const lead = t.items.map((h) => `"${h.text}"`).join(', ');
+        if (t.family) out = { row: t.row, conf: 0.85, why: `${lead}: no row of its own on the master tab; filed with ${name(t.row)}` };
+        else {
+          const cands = scored.filter((x) => t.items.some((h) => x.why.includes(h)));
+          out = settle(cands.length ? cands : scored, lead);
+          if (t.items.every((h) => h.c.w < 3)) out.conf = Math.min(out.conf, 0.8);
+        }
+      }
     }
-    const byHist = Object.entries(acctHist).sort((a, b) => b[1] - a[1])[0];
+    if (out) { out.alts = scored.filter((x) => x.row !== out.row).slice(0, 3).map((x) => ({ row: x.row })); return out; }
+
+    // 3) nothing identifiable: use history for this vendor on this account, then the account itself
+    const vendor = E.vendorKey(line.desc);
+    const vk = M.vendorAcct && vendor ? M.vendorAcct[vendor + '|' + line.acct] : null;
+    const label = hits.length ? `"${hits[0].text}" has no row on the master tab; ` : 'no item named; ';
+    if (vk) {
+      const tot = Object.values(vk).reduce((a, b) => a + b, 0), top = Object.entries(vk).sort((a, b) => b[1] - a[1])[0];
+      if (tot >= 2 && top[1] / tot >= 0.6) return { row: +top[0], conf: 0.8, alts: [], why: label + `${vendor.toUpperCase()} on this account went to ${name(+top[0])} in past years` };
+    }
+    const words = desc.replace(/\b(replace\w*|repair\w*|install\w*|new|reclass|recl|expense|accrual|ye|to|record|paid|by|for|and|the|services?|llc|inc|co|corp|company|ltd)\b/g, ' ').match(/[a-z]{3,}/g) || [];
     const byName = master.leaves.map((r) => ({ r, s: sim(line.acctName, (r.label || r.fedBy || '')) })).sort((a, b) => b.s - a.s)[0];
-    const words = desc.replace(/\b(replace\w*|repair\w*|install\w*|new|reclass|recl|expense|accrual|ye|to|record|paid|by|for|and|the)\b/g, ' ').match(/[a-z]{3,}/g) || [];
-    if (byName && byName.s >= 0.95 && !hits.length && words.length < 2) return { row: byName.r.row, conf: 0.8, alts: [], why: `no item named; the GL account (${line.acctName}) has its own row` };
+    const byHist = Object.entries(acctHist).sort((a, b) => b[1] - a[1])[0];
+    if (byName && byName.s >= 0.95) return { row: byName.r.row, conf: words.length < 2 ? 0.8 : 0.65, alts: [], why: label + `the GL account (${line.acctName}) has its own row` };
+    if (byHist && byHist[1] / histTot >= 0.6) return { row: +byHist[0], conf: 0.75, alts: [], why: label + `${line.acctName} went to ${name(+byHist[0])} in past years` };
     if (byName && byName.s >= 0.6) return { row: byName.r.row, conf: 0.6, alts: [], why: label + `used the GL account's row (${line.acctName})` };
     if (byHist) return { row: +byHist[0], conf: 0.55, alts: [], why: label + `used where ${line.acctName} went before` };
-    if (byName && byName.s > 0) return { row: byName.r.row, conf: 0.4, alts: [], why: label + 'closest row to the GL account name' };
     return { row: null, conf: 0.2, alts: [], why: label + 'pick a row' };
   };
 
@@ -994,9 +1104,10 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     const master = E.parseMaster(wb, masterName);
     const gls = E.glSheets(wb);
     const target = opts.target ? gls.find((g) => g.name === opts.target) : gls.slice().sort((a, b) => b.year - a.year || a.name.length - b.name.length)[0];
-    const vendors = [];
-    for (const g of gls) for (const l of E.parseGL(wb, g.name)) { const m = /^\s*AP (?:Invoice|Adjust)\s*-\s*([^:]+):/i.exec(l.desc); if (m) vendors.push(m[1]); }
+    const vendors = [], allLines = [];
+    for (const g of gls) for (const l of E.parseGL(wb, g.name)) { allLines.push(l); const m = /^\s*AP (?:Invoice|Adjust)\s*-\s*([^:]+):/i.exec(l.desc); if (m) vendors.push(m[1]); }
     E.setVendors(vendors);
+    E.setPrices(allLines);
     const { history, reports } = E.buildHistory(wb, master, { exclude: target ? [target.year] : [] });
     // name blank master rows by the GL account that historically fed them
     const feed = {};
@@ -1014,10 +1125,17 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     const ex = R.history.concat(userExamples || []);
     const M = E.train(ex);
     M.conceptPrefs = E.conceptPrefs(ex);
+    M.history = R.history;
+    M.vendorAcct = {};
+    for (const e of ex) { if (e.row == null) continue; const v = E.vendorKey(e.desc); if (!v) continue; const k = v + '|' + e.acct; const d = (M.vendorAcct[k] = M.vendorAcct[k] || {}); d[e.row] = (d[e.row] || 0) + (e.src === 'user' ? 3 : 1); }
     for (const l of R.lines) {
       if (l.offset) { l.pred = { row: null, conf: 1, why: 'offsets another line in this account' }; continue; }
       l.pred = E.classify(M, l, R.master);
-      if (l.amt < 0 && l.pred.conf < 0.99) { l.pred.conf = Math.min(l.pred.conf, 0.5); l.pred.why = 'credit with no matching charge; ' + l.pred.why; }
+      if (l.amt < 0 && l.pred.conf < 0.99 && !/^reverses/.test(l.pred.why)) {
+        // a credit for a named item (a return) is fine; an unexplained credit needs a look
+        if (E._findConcepts(l.desc).some((h) => h.c.w >= 3)) l.pred.why = 'credit/return: ' + l.pred.why;
+        else { l.pred.conf = Math.min(l.pred.conf, 0.5); l.pred.why = 'credit with no item named; ' + l.pred.why; }
+      }
     }
     R.model = M;
     return R;
@@ -1256,7 +1374,7 @@ function run() {
   STATE = RESULT.lines.map((l, i) => {
     const key = lineKey(l);
     const s = saved.get(key);
-    return { i, l, key, row: s ? userEx.find((u) => u.key === key)?.row ?? s.row : l.pred.row, user: !!s, conf: l.pred.conf };
+    return { i, l, key, row: s ? userEx.find((u) => u.key === key)?.row ?? s.row : l.pred.row, split: s ? s.split || null : l.pred.split || null, user: !!s, conf: l.pred.conf };
   });
   const yc = RESULT.master.yearCols[tYear];
   $('#onMasterHdr').textContent = yc != null ? `On master now (${XLSX.utils.encode_col(yc)})` : 'On master now';
@@ -1283,7 +1401,7 @@ function userExamples(m) {
 // after you correct a line, re-sort the rest so similar lines follow your choice
 function resort() {
   CapexEngine.refresh(RESULT, userExamples(RESULT.master));
-  for (const s of STATE) if (!s.user) { s.row = s.l.pred.row; s.conf = s.l.pred.conf; }
+  for (const s of STATE) if (!s.user) { s.row = s.l.pred.row; s.conf = s.l.pred.conf; s.split = s.l.pred.split || null; }
 }
 function lineKey(l) { return [l.acct, l.date, l.doc, l.desc, l.amt].join('|'); }
 
@@ -1303,7 +1421,7 @@ function render() {
   const th = +$('#selThresh').value;
   const live = STATE.filter((s) => !s.l.offset);
   const review = live.filter((s) => !s.user && s.conf < th);
-  const total = live.reduce((a, s) => a + (s.row ? s.l.amt : 0), 0);
+  const total = live.reduce((a, s) => a + (s.row || s.split ? s.l.amt : 0), 0);
   const confirmed = live.filter((s) => s.user).length;
   $('#stats').innerHTML = [
     ['GL lines', live.length + (STATE.length - live.length ? ` <span class="muted" style="font-size:13px;font-weight:400">+${STATE.length - live.length} offsets</span>` : '')],
@@ -1337,7 +1455,11 @@ function renderLines(th) {
 function renderTotals() {
   const m = RESULT.master, tYear = RESULT.target.year;
   const sums = {}, counts = {};
-  for (const s of STATE) if (!s.l.offset && s.row) { sums[s.row] = (sums[s.row] || 0) + s.l.amt; counts[s.row] = (counts[s.row] || 0) + 1; }
+  for (const s of STATE) {
+    if (s.l.offset) continue;
+    const parts = s.split ? s.split : s.row ? [{ row: s.row, amt: s.l.amt }] : [];
+    for (const p of parts) { sums[p.row] = (sums[p.row] || 0) + p.amt; counts[p.row] = (counts[p.row] || 0) + 1; }
+  }
   let html = '', g = null, gt = 0, gm = 0, any = false;
   const rowsOut = [];
   for (const r of m.leaves) {
@@ -1359,7 +1481,7 @@ function renderTotals() {
 /* ---------- interactions ---------- */
 $('#lineTbl').addEventListener('change', async (e) => {
   const t = e.target;
-  if (t.matches('select[data-i]')) { const s = STATE[+t.dataset.i]; s.row = t.value ? +t.value : null; await remember(s, true); resort(); }
+  if (t.matches('select[data-i]')) { const s = STATE[+t.dataset.i]; s.row = t.value ? +t.value : null; s.split = null; await remember(s, true); resort(); }
   else if (t.matches('input[data-c]')) { const s = STATE[+t.dataset.c]; await remember(s, t.checked); }
   render();
 });
@@ -1369,7 +1491,7 @@ async function remember(s, on) {
   s.user = on;
   if (on && s.row) {
     const lf = RESULT.master.leaves.find((r) => r.row === s.row);
-    pm.examples.push({ key: s.key, year, acct: s.l.acct, acctName: s.l.acctName, desc: s.l.desc, unit: s.l.unit, amt: s.l.amt, row: s.row, rowLabel: lf.label, rowGroup: lf.group, w: 1 });
+    pm.examples.push({ key: s.key, year, acct: s.l.acct, acctName: s.l.acctName, desc: s.l.desc, unit: s.l.unit, amt: s.l.amt, row: s.row, rowLabel: lf.label, rowGroup: lf.group, w: 1, split: s.split || undefined });
   } else if (on && !s.row) {
     pm.examples.push({ key: s.key, year, acct: s.l.acct, acctName: s.l.acctName, desc: s.l.desc, unit: s.l.unit, amt: s.l.amt, row: null, excluded: true });
   }
@@ -1383,7 +1505,7 @@ $('#confirmHigh').onclick = async () => {
 async function rememberQuiet(s) {
   const pm = propMem(); const year = RESULT.target.year; const lf = RESULT.master.leaves.find((r) => r.row === s.row);
   pm.examples = pm.examples.filter((e) => !(e.key === s.key && e.year === year));
-  pm.examples.push({ key: s.key, year, acct: s.l.acct, acctName: s.l.acctName, desc: s.l.desc, unit: s.l.unit, amt: s.l.amt, row: s.row, rowLabel: lf.label, rowGroup: lf.group, w: 1 });
+  pm.examples.push({ key: s.key, year, acct: s.l.acct, acctName: s.l.acctName, desc: s.l.desc, unit: s.l.unit, amt: s.l.amt, row: s.row, rowLabel: lf.label, rowGroup: lf.group, w: 1, split: s.split || undefined });
   s.user = true;
 }
 $('#filterSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; FILTER = b.dataset.f; $$('#filterSeg button').forEach((x) => x.classList.toggle('on', x === b)); render(); });
@@ -1398,13 +1520,19 @@ $('#exportBtn').onclick = () => {
   const t = RESULT.target, m = RESULT.master;
   const s1 = [['Row', 'Master row', 'Group', `${t.year} sorted amount`, 'Lines', 'On master now', 'Difference']].concat(renderTotals.rows.map((r) => [r[0], r[1], r[2], r[3], r[4], r[5] || 0, Math.round((r[3] - (r[5] || 0)) * 100) / 100]));
   const leafBy = Object.fromEntries(m.leaves.map((r) => [r.row, r]));
-  const s2 = [['Posted', 'Doc', 'GL account', 'Account name', 'Description', 'Unit', 'JNL', 'Amount', 'Master row', 'Category', 'Group', 'Status', 'Confidence', 'Source row']].concat(STATE.map((s) => {
-    const l = s.l, lf = s.row ? leafBy[s.row] : null;
-    return [l.date, l.doc, l.acct, l.acctName, l.desc, l.unit, l.jnl, l.amt, l.offset ? '' : (s.row || ''), l.offset ? 'Offset pair' : lf ? lf.display : 'Not capex', lf ? lf.group : '', l.offset ? 'offset' : s.user ? 'confirmed' : s.conf < +$('#selThresh').value ? 'review' : 'auto', l.offset ? '' : Math.round(s.conf * 100) / 100, l.srcRow];
-  }));
+  const s2 = [['Posted', 'Doc', 'GL account', 'Account name', 'Description', 'Unit', 'JNL', 'Amount', 'Master row', 'Category', 'Group', 'Status', 'Confidence', 'Why', 'Source row']];
+  for (const s of STATE) {
+    const l = s.l;
+    const status = l.offset ? 'offset' : s.user ? 'confirmed' : s.conf < +$('#selThresh').value ? 'review' : 'auto';
+    const parts = !l.offset && s.split ? s.split : [{ row: s.row, amt: l.amt }];
+    parts.forEach((p, k) => {
+      const lf = p.row ? leafBy[p.row] : null;
+      s2.push([l.date, l.doc, l.acct, l.acctName, parts.length > 1 ? `${l.desc}  [split ${k + 1}/${parts.length}: ${p.item}]` : l.desc, l.unit, l.jnl, p.amt, l.offset ? '' : (p.row || ''), l.offset ? 'Offset pair' : lf ? lf.display : 'Not capex', lf ? lf.group : '', parts.length > 1 ? status + ' (split)' : status, l.offset ? '' : Math.round(s.conf * 100) / 100, s.user ? 'confirmed by you' : l.pred.why, l.srcRow]);
+    });
+  }
   const wb = XLSX.utils.book_new();
   const w1 = XLSX.utils.aoa_to_sheet(s1); w1['!cols'] = [{ wch: 6 }, { wch: 44 }, { wch: 30 }, { wch: 16 }, { wch: 7 }, { wch: 15 }, { wch: 12 }];
-  const w2 = XLSX.utils.aoa_to_sheet(s2); w2['!cols'] = [{ wch: 11 }, { wch: 12 }, { wch: 11 }, { wch: 28 }, { wch: 60 }, { wch: 8 }, { wch: 5 }, { wch: 12 }, { wch: 7 }, { wch: 40 }, { wch: 28 }, { wch: 10 }, { wch: 9 }, { wch: 8 }];
+  const w2 = XLSX.utils.aoa_to_sheet(s2); w2['!cols'] = [{ wch: 11 }, { wch: 12 }, { wch: 11 }, { wch: 28 }, { wch: 60 }, { wch: 8 }, { wch: 5 }, { wch: 12 }, { wch: 7 }, { wch: 40 }, { wch: 28 }, { wch: 10 }, { wch: 9 }, { wch: 60 }, { wch: 8 }];
   XLSX.utils.book_append_sheet(wb, w1, `${t.year} by master row`);
   XLSX.utils.book_append_sheet(wb, w2, `${t.year} GL tagged`);
   XLSX.writeFile(wb, `${PROP.replace(/[^\w ]+/g, '').trim()} ${t.year} capex allocation.xlsx`);
