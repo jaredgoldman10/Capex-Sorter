@@ -191,7 +191,7 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
         <button class="btn primary" id="exportBtn">Download allocation (.xlsx)</button>
       </div>
       <div class="tbl-wrap"><table id="totTbl"><thead><tr>
-        <th class="num">Row</th><th>Master row</th><th class="num">Lines</th><th class="num">Sorted amount</th><th class="num" id="onMasterHdr">On master now</th><th class="num">Difference</th>
+        <th class="num">Row</th><th>Master row</th><th>GL account</th><th class="num">Lines</th><th class="num">Sorted amount</th><th class="num" id="onMasterHdr">On master now</th><th class="num">Difference</th>
       </tr></thead><tbody></tbody></table></div>
     </div>
 
@@ -1121,7 +1121,8 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
         if (!t) continue;
         const key = t.norm || 'row' + t.row;
         let g = targets.find((x) => x.key === key);
-        if (!g) targets.push((g = { key, row: t.row, group: t.group, items: [], family: !!t.family }));
+        if (!g) targets.push((g = { key, row: t.row, group: t.group, items: [], family: !!t.family, cands: [] }));
+        g.cands = g.cands.concat(own.map((x) => ({ row: x.row, s: x.s, offPlace: x.offPlace }))).sort((a, b) => b.s - a.s);
         g.items.push(h);
       }
       if (targets.length > 1 && /\bpool\b/.test(desc) && items.every((h) => HARDSCAPE.has(h.c.id) || /pool/.test(h.c.id))) {
@@ -1137,7 +1138,7 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
           let left = line.amt;
           const split = est.map((e, i) => {
             const amt = i === est.length - 1 ? Math.round(left * 100) / 100 : Math.round((line.amt * e.v / tot) * 100) / 100;
-            left -= amt; return { row: e.t.row, amt, item: e.t.items.map((h) => h.text).join(' + ') };
+            left -= amt; return { row: e.t.row, amt, item: e.t.items.map((h) => h.text).join(' + '), cands: e.t.cands };
           });
           const main = split.slice().sort((a, b) => Math.abs(b.amt) - Math.abs(a.amt))[0];
           out = { row: main.row, split, conf: 0.9, why: `split by typical unit cost: ${split.map((p) => `${p.item} ${money(p.amt)} → ${name(p.row)}`).join('; ')}` };
@@ -1164,7 +1165,12 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
         }
       }
     }
-    if (out) { out.alts = scored.filter((x) => x.row !== out.row).slice(0, 3).map((x) => ({ row: x.row })); return out; }
+    if (out) {
+      out.alts = scored.filter((x) => x.row !== out.row).slice(0, 3).map((x) => ({ row: x.row }));
+      // every row that fits what the line names, best first (used when a row turns out to belong to another GL account)
+      out.cands = scored.map((x) => ({ row: x.row, s: x.s, offPlace: x.offPlace, labeled: x.labeled }));
+      return out;
+    }
 
     // 3) nothing identifiable: use history for this vendor on this account, then the account itself
     const vendor = E.vendorKey(line.desc);
@@ -1274,6 +1280,106 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
     return wb;
   };
   const cleanFee = (d) => String(d || '').replace(/^\s*AP (Invoice|Adjust)\s*-\s*[^:]+:/i, '').replace(/^\s*[A-Z0-9][A-Z0-9 &.,'@\/\-]{2,60}:\s/, '').replace(/^\s*-?\d+(\.\d+)?\s+-?[\d,]+\.\d{2}\s+/, '').trim();
+  /* Each master row belongs to one GL account. A row's account is the one that fed it in past years;
+     a row with no history goes to the account with the most dollars on it this year. A line whose
+     best row belongs to another account moves to its next-best row that is free or its own account's,
+     and failing that to a row its own account has always used. */
+  E.oneAccountPerRow = function (R, M) {
+    const m = R.master, leafBy = Object.fromEntries(m.leaves.map((r) => [r.row, r]));
+    const nm = (row) => { const r = leafBy[row]; return r ? (r.label || r.display || '').trim() : ''; };
+    const owner = {}, ownerName = {};
+    // the account that put the most dollars on a row across all past years owns it
+    const fed = {};
+    for (const e of R.history) {
+      if (e.row == null || e.row < 0) continue;
+      const f = (fed[e.row] = fed[e.row] || {}); f[e.acct] = (f[e.acct] || 0) + Math.abs(e.amt);
+      ownerName[e.acct] = e.acctName;
+    }
+    for (const [row, by] of Object.entries(fed)) owner[row] = Object.entries(by).sort((a, b) => b[1] - a[1])[0][0];
+    const histOwned = new Set(Object.keys(owner));
+    // the pieces of this year's GL that each land on one row
+    const units = [];
+    for (const l of R.lines) {
+      if (l.offset || !l.pred) continue;
+      ownerName[l.acct] = l.acctName;
+      const fixed = l.pred.conf >= 0.99; // your rules and your own choices stay where you put them
+      if (l.pred.split) l.pred.split.forEach((p) => units.push({ l, p, acct: l.acct, amt: Math.abs(p.amt), cands: p.cands || [], fixed }));
+      else if (l.pred.row != null) units.push({ l, p: l.pred, acct: l.acct, amt: Math.abs(l.amt), cands: l.pred.cands || [], fixed });
+    }
+    for (const u of units) if (u.fixed) owner[u.p.row] = owner[u.p.row] && histOwned.has(String(u.p.row)) && owner[u.p.row] !== u.acct ? owner[u.p.row] : u.acct;
+    // rows an account has used before, most-used first
+    const ownRows = {};
+    for (const e of R.history) if (e.row != null && e.row >= 0 && owner[e.row] === e.acct) (ownRows[e.acct] = ownRows[e.acct] || {})[e.row] = ((ownRows[e.acct] || {})[e.row] || 0) + Math.abs(e.amt);
+    const moved = new Map();
+    for (let pass = 0; pass < 6; pass++) {
+      // unowned rows go to whichever account has the most dollars on them
+      const claims = {};
+      for (const u of units) { const c = (claims[u.p.row] = claims[u.p.row] || {}); c[u.acct] = (c[u.acct] || 0) + u.amt; }
+      for (const [row, c] of Object.entries(claims)) if (!owner[row]) owner[row] = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0];
+      let changed = false;
+      for (const u of units) {
+        if (u.fixed || owner[u.p.row] === u.acct) continue;
+        const from = u.p.row, top = u.cands.length ? u.cands[0].s : 0;
+        // next-best row by meaning that is this account's or nobody's, without a place the line doesn't name
+        let next = u.cands.find((c) => (owner[c.row] === u.acct || !owner[c.row]) && !c.offPlace && c.s >= top - 2.5 && c.row !== from);
+        let how = 'next-best fit';
+        if (!next) {
+          const mine = Object.entries(ownRows[u.acct] || {}).sort((a, b) => b[1] - a[1]).map(([r]) => +r);
+          let byMeaning = u.cands.find((c) => owner[c.row] === u.acct && !c.offPlace);
+          if (!byMeaning) {
+            // anything the line mentions, even as a place ("drywall around new tub surround" → the tub row)
+            const hits = findConcepts(u.l.desc);
+            const d = cleanDesc(u.l.desc), lt = (r) => r.label.toLowerCase();
+            const offPlace = (r) => PLACES.some((p) => p.pen >= 0.5 && p.r.test(lt(r)) && !p.d.test(d));
+            const r = m.leaves.find((r) => r.label && owner[r.row] === u.acct && !offPlace(r) && hits.some((h) => h.c.r.test(rowText(r))));
+            if (r) byMeaning = { row: r.row };
+          }
+          const byName = m.leaves.filter((r) => owner[r.row] === u.acct || !owner[r.row]).map((r) => ({ r, s: sim(u.l.acctName, r.label || r.fedBy || '') })).sort((a, b) => b.s - a.s)[0];
+          if (byMeaning) { next = byMeaning; how = 'closest row of this account'; }
+          else if (byName && byName.s >= 0.6) { next = { row: byName.r.row }; how = "this account's own row"; }
+          else if (mine.length) { next = { row: mine[0] }; how = 'the row this account has used most'; }
+          else {
+            // last resort: a free row for the kind of item the account itself is named for ("Interior - Flooring" → a floors row)
+            const kinds = findConcepts(u.l.acctName).filter((h) => !h.c.place);
+            const free = m.leaves.filter((r) => r.label && (owner[r.row] === u.acct || !owner[r.row]) && kinds.some((h) => h.c.r.test(rowText(r))));
+            if (free.length) { next = { row: free[0].row }; how = `a free ${kinds[0].c.id} row`; }
+          }
+        }
+        if (!next) continue;
+        u.p.row = next.row; changed = true;
+        moved.set(u, { from, how });
+      }
+      if (!changed) break;
+    }
+    for (const [u, { from, how }] of moved) {
+      const note = `${nm(from)} belongs to ${ownerName[owner[from]] || owner[from]}; ${how} for ${u.l.acctName}: ${nm(u.p.row)}`;
+      if (u.p === u.l.pred) { u.l.pred.why = note; u.l.pred.conf = Math.min(u.l.pred.conf, how === 'next-best fit' ? 0.85 : 0.8); }
+      else { u.l.pred.why += `; ${u.p.item}: ${note}`; }
+    }
+    for (const l of R.lines) {
+      if (!l.pred || !l.pred.split) continue;
+      // parts that ended up on the same row are one part
+      const merged = [];
+      for (const p of l.pred.split) { const g = merged.find((x) => x.row === p.row); if (g) { g.amt = Math.round((g.amt + p.amt) * 100) / 100; g.item += ' + ' + p.item; } else merged.push({ ...p }); }
+      if (merged.length === 1) { l.pred.row = merged[0].row; delete l.pred.split; }
+      else { l.pred.split = merged; l.pred.row = merged.slice().sort((a, b) => Math.abs(b.amt) - Math.abs(a.amt))[0].row; }
+    }
+    R.rowOwner = owner; R.accountNames = ownerName;
+  };
+  function feesFollow(R) {
+    // tax, shipping, freight and discounts go wherever the rest of that invoice went
+    const FEE = /^\W*(sales )?(tax|shipping|freight|delivery( charge)?|discount|fuel surcharge|handling)\W*$/i;
+    for (const l of R.lines) {
+      if (l.offset || !l.pred || !l.doc || !l.doc.trim()) continue;
+      const words = cleanFee(l.desc);
+      if (!FEE.test(words)) continue;
+      const sib = R.lines.filter((o) => o !== l && o.doc === l.doc && o.acct === l.acct && !o.offset && o.pred && !FEE.test(cleanFee(o.desc)) && o.pred.row != null);
+      if (!sib.length) continue;
+      const by = {}; for (const o of sib) by[o.pred.row] = (by[o.pred.row] || 0) + Math.abs(o.amt);
+      const row = +Object.entries(by).sort((a, b) => b[1] - a[1])[0][0];
+      l.pred = { row, conf: 0.9, alts: [], why: `${words.trim()} on invoice ${l.doc.trim()}; follows that invoice's items` };
+    }
+  }
   // re-sort after you confirm or change lines, without re-reading the workbook
   E.refresh = function (R, userExamples) {
     const ex = R.history.concat(userExamples || []);
@@ -1292,18 +1398,9 @@ if(xr(e,"index.xml"))throw new Error("Unsupported NUMBERS 09 file");throw new Er
         else { l.pred.conf = Math.min(l.pred.conf, 0.5); l.pred.why = 'credit with no item named; ' + l.pred.why; }
       }
     }
-    // tax, shipping, freight and discounts go wherever the rest of that invoice went
-    const FEE = /^\W*(sales )?(tax|shipping|freight|delivery( charge)?|discount|fuel surcharge|handling)\W*$/i;
-    for (const l of R.lines) {
-      if (l.offset || !l.pred || !l.doc || !l.doc.trim()) continue;
-      const words = cleanFee(l.desc);
-      if (!FEE.test(words)) continue;
-      const sib = R.lines.filter((o) => o !== l && o.doc === l.doc && o.acct === l.acct && !o.offset && o.pred && !FEE.test(cleanFee(o.desc)) && o.pred.row != null);
-      if (!sib.length) continue;
-      const by = {}; for (const o of sib) by[o.pred.row] = (by[o.pred.row] || 0) + Math.abs(o.amt);
-      const row = +Object.entries(by).sort((a, b) => b[1] - a[1])[0][0];
-      l.pred = { row, conf: 0.9, alts: [], why: `${words.trim()} on invoice ${l.doc.trim()}; follows that invoice's items` };
-    }
+    feesFollow(R);
+    E.oneAccountPerRow(R, M);
+    feesFollow(R);
     R.model = M;
     return R;
   };
@@ -1642,14 +1739,15 @@ function renderTotals() {
   for (const r of m.leaves) {
     const v = Math.round((sums[r.row] || 0) * 100) / 100, cur = r.values[tYear] || 0;
     if (!v && !cur) continue;
-    if (r.group !== g) { g = r.group; html += `<tr class="grp"><td></td><td colspan="5">${esc(g)}</td></tr>`; }
+    if (r.group !== g) { g = r.group; html += `<tr class="grp"><td></td><td colspan="6">${esc(g)}</td></tr>`; }
     const d = Math.round((v - cur) * 100) / 100;
     gt += v; gm += cur; any = true;
-    rowsOut.push([r.row, r.display, r.group, v, counts[r.row] || 0, cur]);
-    html += `<tr><td class="num">${r.row}</td><td>${esc(r.display)}</td><td class="num">${counts[r.row] || ''}</td><td class="num">${v ? fmt(v) : ''}</td><td class="num">${cur ? fmt(cur) : ''}</td><td class="num ${cur && Math.abs(d) > 0.005 ? 'diff' : ''}">${cur && Math.abs(d) > 0.005 ? fmt(d) : ''}</td></tr>`;
+    const own = (RESULT.rowOwner || {})[r.row], ownName = own ? `${own} ${(RESULT.accountNames || {})[own] || ''}`.trim() : '';
+    rowsOut.push([r.row, r.display, r.group, v, counts[r.row] || 0, cur, ownName]);
+    html += `<tr><td class="num">${r.row}</td><td>${esc(r.display)}</td><td class="acct">${esc(v ? ownName : '')}</td><td class="num">${counts[r.row] || ''}</td><td class="num">${v ? fmt(v) : ''}</td><td class="num">${cur ? fmt(cur) : ''}</td><td class="num ${cur && Math.abs(d) > 0.005 ? 'diff' : ''}">${cur && Math.abs(d) > 0.005 ? fmt(d) : ''}</td></tr>`;
   }
-  html += `<tr><td></td><td><b>Total</b></td><td></td><td class="num"><b>${fmt(gt)}</b></td><td class="num"><b>${fmt(gm)}</b></td><td></td></tr>`;
-  $('#totTbl tbody').innerHTML = any ? html : '<tr><td colspan="6" class="muted" style="padding:22px;text-align:center">No amounts yet.</td></tr>';
+  html += `<tr><td></td><td><b>Total</b></td><td></td><td></td><td class="num"><b>${fmt(gt)}</b></td><td class="num"><b>${fmt(gm)}</b></td><td></td></tr>`;
+  $('#totTbl tbody').innerHTML = any ? html : '<tr><td colspan="7" class="muted" style="padding:22px;text-align:center">No amounts yet.</td></tr>';
   const yc = m.yearCols[tYear];
   $('#totNote').textContent = yc != null ? `Rows are ${m.sheet} row numbers; ${tYear} lives in column ${XLSX.utils.encode_col(yc)}.` : '';
   renderTotals.rows = rowsOut;
@@ -1740,7 +1838,7 @@ $('#allBtn').onclick = async () => {
 };
 $('#exportBtn').onclick = () => {
   const t = RESULT.target, m = RESULT.master;
-  const s1 = [['Row', 'Master row', 'Group', `${t.year} sorted amount`, 'Lines', 'On master now', 'Difference']].concat(renderTotals.rows.map((r) => [r[0], r[1], r[2], r[3], r[4], r[5] || 0, Math.round((r[3] - (r[5] || 0)) * 100) / 100]));
+  const s1 = [['Row', 'Master row', 'Group', 'GL account', `${t.year} sorted amount`, 'Lines', 'On master now', 'Difference']].concat(renderTotals.rows.map((r) => [r[0], r[1], r[2], r[3] ? r[6] : '', r[3], r[4], r[5] || 0, Math.round((r[3] - (r[5] || 0)) * 100) / 100]));
   const leafBy = Object.fromEntries(m.leaves.map((r) => [r.row, r]));
   const s2 = [['Posted', 'Doc', 'GL account', 'Account name', 'Description', 'Unit', 'JNL', 'Amount', 'Master row', 'Category', 'Group', 'Status', 'Confidence', 'Why', 'Source row']];
   for (const s of STATE) {
