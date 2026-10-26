@@ -213,7 +213,6 @@ td select{width:100%;min-width:220px;max-width:330px;padding:5px 6px;border:1px 
         <div class="row">
           <div class="grow"><b>Finalize</b> <span class="muted" id="finalNote"></span></div>
           <label class="muted" style="font-size:13px">Write into column <select id="finalCol" style="padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel)"></select></label>
-          <label class="muted" style="font-size:13px"><input type="checkbox" id="finalClear"> Blank other figures in that column</label>
           <button class="btn" id="showLeft">Show unconfirmed</button>
           <button class="btn primary" id="finalBtn" disabled>Finalize and download Page 1</button>
         </div>
@@ -2006,8 +2005,8 @@ function renderFinal() {
   $('#finalNote').textContent = left ? `· ${left} of ${live.length} lines still to confirm` : `· all ${live.length} lines confirmed · ${rows} rows · $${fmt(tot)}`;
   const c = +sel.value, ws = WB.Sheets[RESULT.master.sheet];
   const others = RESULT.master.leaves.filter((r) => !(r.row in sums)).map((r) => ({ r, x: ws[XLSX.utils.encode_cell({ r: r.row - 1, c })] })).filter((o) => o.x && typeof o.x.v === 'number' && o.x.v);
-  $('#finalHelp').textContent = `Downloads the workbook you uploaded with the confirmed totals written into ${RESULT.master.sheet} column ${XLSX.utils.encode_col(c)}, one figure per master row (lines on the same row added together). Every other cell, tab and format stays exactly as uploaded; totals recalculate when it opens.` +
-    (others.length ? ` That column already has figures on ${others.length} other row${others.length === 1 ? '' : 's'} (${others.slice(0, 4).map((o) => `row ${o.r.row} ${(o.r.label || '').trim()}: ${fmt(o.x.v)}`).join('; ')}); tick "Blank other figures" to clear them.` : '');
+  $('#finalHelp').textContent = `Downloads the workbook you uploaded with your confirmed totals in ${RESULT.master.sheet} column ${XLSX.utils.encode_col(c)}, rows ${RESULT.master.firstRow}–${RESULT.master.lastRow}: one figure per master row (lines on the same row added together), replacing what was there. Subtotal formulas, every other column and tab, and all formatting stay exactly as uploaded; totals recalculate when it opens.` +
+    (others.length ? ` Figures already in that column on rows your lines don't reach will be cleared: ${others.slice(0, 6).map((o) => `row ${o.r.row} ${(o.r.label || '').trim()} ${fmt(o.x.v)}`).join('; ')}${others.length > 6 ? `; +${others.length - 6} more` : ''}.` : '');
   renderFinal.others = others.map((o) => o.r.row);
 }
 $('#finalCol').onchange = renderFinal;
@@ -2032,12 +2031,12 @@ $('#finalBtn').onclick = async () => {
   const b = $('#finalBtn'); b.disabled = true; b.textContent = 'Building…';
   try {
     const sums = finalSums(), col = +$('#finalCol').value;
-    const clear = $('#finalClear').checked ? renderFinal.others || [] : [];
+    const clear = renderFinal.others || []; // your confirmed totals replace whatever the column held before
     const { file, skipped } = await CapexFinalize.finalize(JSZip, WB_BYTES, RESULT.master.sheet, col, sums, { clear });
     const a = document.createElement('a'); a.href = URL.createObjectURL(file);
     a.download = `${PROP.replace(/[^\w ]+/g, '').trim()} ${RESULT.master.sheet} ${RESULT.target.year} finalized.xlsx`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    toast(`${Object.keys(sums).length} rows written to column ${XLSX.utils.encode_col(col)}${skipped.length ? `; rows ${skipped.join(', ')} hold a shared formula and were left alone` : ''}.`);
+    toast(`${Object.keys(sums).length} rows written to column ${XLSX.utils.encode_col(col)}${clear.length ? `, ${clear.length} old figure${clear.length === 1 ? '' : 's'} cleared` : ''}${skipped.length ? `; rows ${skipped.join(', ')} hold a shared formula and were left alone` : ''}.`);
   } catch (e) { toast("Couldn't build the file: " + (e.message || e)); }
   b.textContent = 'Finalize and download Page 1'; renderFinal();
 };
